@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SolidWorks Surfacing Portfolio | D. Herzberg</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <canvas id="particle-canvas"></canvas>
+
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-brand"><a href="../index.html">D. HERZBERG</a></div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="../index.html">Home</a></li>
+            <li><a href="../index.html#projects">Projects</a></li>
+            <li><a href="../index.html#resume">Resume</a></li>
+            <li><a href="../index.html#contact">Contact</a></li>
+        </ul>
+    </nav>
+
+    <!-- Project Hero -->
+    <section class="project-hero">
+        <div>
+            <h1>SolidWorks Surface Modeling</h1>
+            <p>Complex freeform surface modeling in SolidWorks — organic shapes, automotive bodies, aerospace forms, medical devices, and consumer electronics. Demonstrating advanced Class-A surfacing techniques and continuity control.</p>
+        </div>
+    </section>
+
+    <!-- Content -->
+    <div class="project-content">
+        <a href="../index.html#projects" class="back-link"><i class="fas fa-arrow-left"></i> Back to Projects</a>
+
+        <!-- 3D Model Viewer Placeholder -->
+        <h3 style="color: var(--primary); margin-bottom: 1rem;">Interactive 3D Model</h3>
+        <div class="model-viewer-container" id="model-viewer">
+            <div class="model-placeholder">
+                <i class="fas fa-cube"></i>
+                <p>3D Model Placeholder</p>
+                <p style="font-size: 0.8rem; opacity: 0.6;">Place a .glb file at assets/models/surfacing.glb</p>
+            </div>
+        </div>
+
+        <!-- Gallery: Automotive -->
+        <div class="gallery">
+            <h3>Automotive Surfaces</h3>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Charger Front No Environment.JPG" alt="Dodge Charger front surface model" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Charger Ambient Occlusion.JPG" alt="Charger ambient occlusion study" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/4-23-12 Front.JPG" alt="Vehicle front surfacing" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/4-23-12 Iso Rear.JPG" alt="Vehicle rear isometric" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Iso Rear.JPG" alt="Isometric rear surface" loading="lazy">
+                </div>
+            </div>
+        </div>
+
+        <!-- Gallery: Aerospace -->
+        <div class="gallery">
+            <h3>Aerospace & Complex Forms</h3>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Bell X-1.JPG" alt="Bell X-1 rocket plane surfacing" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/F16.png" alt="F-16 surface model" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Flower.JPG" alt="Organic flower surface" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Contour render.png" alt="Surface continuity contour" loading="lazy">
+                </div>
+            </div>
+        </div>
+
+        <!-- Gallery: Consumer Products -->
+        <div class="gallery">
+            <h3>Consumer & Medical Products</h3>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Epic Render 2 with handles.JPG" alt="Product surfacing with handles" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Rev2 - Orange Floating.JPG" alt="Floating product render" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/HeartScope Render 7-20-12.JPG" alt="HeartScope medical device surface" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/BayerContourRender.JPG" alt="Bayer Contour blood glucose meter" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Isometric Render.jpg" alt="Isometric product render" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Blackberry Z10 skin.png" alt="Blackberry Z10 surface model" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Fossil Watch 2.JPG" alt="Fossil watch surface modeling" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Fossil Watch 5.jpg" alt="Fossil watch detailed surfaces" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Ring Render 2018-03-01 B.png" alt="Ring jewelry surface model" loading="lazy">
+                </div>
+            </div>
+        </div>
+
+        <!-- Gallery: Medical Clips -->
+        <div class="gallery">
+            <h3>Medical Device Clip Designs</h3>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Frazier Clip.png" alt="Frazier clip design" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Frazier Clip w Extensions.png" alt="Frazier clip with extensions" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Lifescan Clip R2.png" alt="Lifescan clip revision 2" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/Rice Clip w Extensions.png" alt="Rice clip with extensions" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/VerioIQ Clip w Extensions.png" alt="VerioIQ clip with extensions" loading="lazy">
+                </div>
+            </div>
+        </div>
+
+        <!-- Gallery: Liner / Housing -->
+        <div class="gallery">
+            <h3>Housing & Enclosure Surfacing</h3>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/4-24-12 HazyLiner Iso.JPG" alt="Liner housing isometric" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/surfacing/4-24-12 HazyLiner Iso Rear.JPG" alt="Liner housing rear view" loading="lazy">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox">
+        <button class="lightbox-close" aria-label="Close">&times;</button>
+        <img src="" alt="">
+    </div>
+
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg. All rights reserved.</p>
+    </footer>
+
+    <script src="../js/particles.js"></script>
+    <script src="../js/main.js"></script>
+</body>
+</html>

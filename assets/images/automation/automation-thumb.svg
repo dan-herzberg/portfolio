@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+  <rect width="800" height="500" fill="#12121a"/>
+  <rect x="50" y="50" width="700" height="400" rx="10" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+  <!-- Code window look -->
+  <circle cx="90" cy="80" r="8" fill="#ff5f56"/>
+  <circle cx="115" cy="80" r="8" fill="#ffbd2e"/>
+  <circle cx="140" cy="80" r="8" fill="#27c93f"/>
+  <!-- Code lines -->
+  <rect x="80" y="120" width="200" height="12" rx="3" fill="#00d4ff" opacity="0.6"/>
+  <rect x="100" y="150" width="350" height="12" rx="3" fill="#8a8a9a" opacity="0.4"/>
+  <rect x="100" y="180" width="280" height="12" rx="3" fill="#8a8a9a" opacity="0.4"/>
+  <rect x="100" y="210" width="400" height="12" rx="3" fill="#ff6b35" opacity="0.5"/>
+  <rect x="120" y="240" width="250" height="12" rx="3" fill="#8a8a9a" opacity="0.4"/>
+  <rect x="120" y="270" width="320" height="12" rx="3" fill="#8a8a9a" opacity="0.4"/>
+  <rect x="100" y="300" width="180" height="12" rx="3" fill="#00d4ff" opacity="0.6"/>
+  <rect x="80" y="340" width="150" height="12" rx="3" fill="#ff6b35" opacity="0.5"/>
+  <!-- Gear icons -->
+  <g transform="translate(600, 250)" opacity="0.3">
+    <circle cx="0" cy="0" r="40" fill="none" stroke="#00d4ff" stroke-width="3"/>
+    <circle cx="0" cy="0" r="15" fill="none" stroke="#00d4ff" stroke-width="3"/>
+    <rect x="-4" y="-50" width="8" height="20" fill="#00d4ff"/>
+    <rect x="-4" y="30" width="8" height="20" fill="#00d4ff"/>
+    <rect x="-50" y="-4" width="20" height="8" fill="#00d4ff"/>
+    <rect x="30" y="-4" width="20" height="8" fill="#00d4ff"/>
+  </g>
+</svg>

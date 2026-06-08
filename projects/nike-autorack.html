@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autorack Scanner Bracket | D. Herzberg</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <canvas id="particle-canvas"></canvas>
+
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-brand"><a href="../index.html">D. HERZBERG</a></div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="../index.html">Home</a></li>
+            <li><a href="../index.html#projects">Projects</a></li>
+            <li><a href="../index.html#resume">Resume</a></li>
+            <li><a href="../index.html#contact">Contact</a></li>
+        </ul>
+    </nav>
+
+    <!-- Project Hero -->
+    <section class="project-hero">
+        <div>
+            <h1>Autorack Adjustable Scanner Bracket</h1>
+            <p>Iterative prototype development of an adjustable scanner mounting bracket for autorack sortation systems. Multiple detent mechanisms tested through rapid prototyping.</p>
+        </div>
+    </section>
+
+    <!-- Content -->
+    <div class="project-content">
+        <a href="../index.html#projects" class="back-link"><i class="fas fa-arrow-left"></i> Back to Projects</a>
+
+        <!-- 3D Model Viewer -->
+        <h3 style="color: var(--primary); margin-bottom: 1rem;">Interactive 3D Model</h3>
+        <div class="model-viewer-container" id="model-viewer">
+            <div class="model-placeholder">
+                <i class="fas fa-cube"></i>
+                <p>3D Model Placeholder</p>
+                <p style="font-size: 0.8rem; opacity: 0.6;">Place your .glb file at assets/models/nike-autorack.glb</p>
+            </div>
+            <div class="model-controls">
+                <button data-action="rotate"><i class="fas fa-sync-alt"></i> Auto Rotate</button>
+                <button data-action="reset"><i class="fas fa-undo"></i> Reset View</button>
+            </div>
+        </div>
+
+        <!-- Videos -->
+        <div class="video-section">
+            <h3>Prototype Testing Videos</h3>
+            <div class="video-grid">
+                <div class="video-item">
+                    <video controls preload="metadata">
+                        <source src="../assets/videos/nike/1mm Detents - compressed.m4v" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p>1mm Detent Mechanism Testing</p>
+                </div>
+                <div class="video-item">
+                    <video controls preload="metadata">
+                        <source src="../assets/videos/nike/2mm Detents - compressed.m4v" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p>2mm Detent Mechanism Testing</p>
+                </div>
+                <div class="video-item">
+                    <video controls preload="metadata">
+                        <source src="../assets/videos/nike/Bracket Rigidity - compressed.m4v" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p>Bracket Rigidity Evaluation</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Photo Gallery -->
+        <div class="gallery">
+            <h3>Prototype Photos & Iterations</h3>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/610-02070-NA-INT_R01.png" alt="Scanner bracket drawing" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-27 16.35.38.jpg" alt="Prototype iteration 1" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-27 16.35.47.jpg" alt="Bracket prototype detail" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-27 16.35.52.jpg" alt="Detent mechanism closeup" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-27 16.36.14.jpg" alt="Assembly test" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-27 16.36.25.jpg" alt="Mounting evaluation" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-30 11.56.57.jpg" alt="Revision 2 prototype" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-30 11.57.14.jpg" alt="Revision 2 detail" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-30 12.04.01.jpg" alt="Fit check" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-30 12.19.58.jpg" alt="Installation test" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-30 12.20.24.jpg" alt="Range of motion test" loading="lazy">
+                </div>
+                <div class="gallery-item">
+                    <img src="../assets/images/nike/2020-03-31 09.02.17.jpg" alt="Final prototype" loading="lazy">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox">
+        <button class="lightbox-close" aria-label="Close">&times;</button>
+        <img src="" alt="">
+    </div>
+
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg. All rights reserved.</p>
+    </footer>
+
+    <script src="../js/particles.js"></script>
+    <script src="../js/main.js"></script>
+    <script type="module">
+        import { initModelViewer } from '../js/model-viewer.js';
+        // Uncomment when .glb is available:
+        // initModelViewer('model-viewer', '../assets/models/nike-autorack.glb');
+    </script>
+</body>
+</html>

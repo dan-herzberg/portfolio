@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Engineering Automation Tools | D. Herzberg</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <canvas id="particle-canvas"></canvas>
+
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-brand"><a href="../index.html">D. HERZBERG</a></div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="../index.html">Home</a></li>
+            <li><a href="../index.html#projects">Projects</a></li>
+            <li><a href="../index.html#resume">Resume</a></li>
+            <li><a href="../index.html#contact">Contact</a></li>
+        </ul>
+    </nav>
+
+    <!-- Project Hero -->
+    <section class="project-hero">
+        <div>
+            <h1>Engineering Automation Tools</h1>
+            <p>Custom software tools built to automate repetitive engineering workflows — BOM processing, workbook merging, data consolidation, and reporting.</p>
+        </div>
+    </section>
+
+    <!-- Content -->
+    <div class="project-content">
+        <a href="../index.html#projects" class="back-link"><i class="fas fa-arrow-left"></i> Back to Projects</a>
+
+        <!-- 3D Model Viewer Placeholder -->
+        <h3 style="color: var(--primary); margin-bottom: 1rem;">Interactive 3D Model</h3>
+        <div class="model-viewer-container" id="model-viewer">
+            <div class="model-placeholder">
+                <i class="fas fa-cube"></i>
+                <p>3D Model Placeholder</p>
+                <p style="font-size: 0.8rem; opacity: 0.6;">Place your .glb file at assets/models/automation-tools.glb</p>
+            </div>
+        </div>
+
+        <!-- Tool Showcase Cards -->
+        <div class="gallery" style="margin-top: 3rem;">
+            <h3>Tools Developed</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+                
+                <div style="background: var(--bg-card); border-radius: var(--radius); padding: 2rem; border: 1px solid rgba(255,255,255,0.05);">
+                    <i class="fas fa-table" style="font-size: 2.5rem; color: var(--primary); margin-bottom: 1rem;"></i>
+                    <h4 style="margin-bottom: 0.5rem;">BOM Automation Worksheet</h4>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Automated Bill of Materials processing — extracting, validating, and formatting BOM data from CAD exports into standardized formats.</p>
+                </div>
+
+                <div style="background: var(--bg-card); border-radius: var(--radius); padding: 2rem; border: 1px solid rgba(255,255,255,0.05);">
+                    <i class="fas fa-code-merge" style="font-size: 2.5rem; color: var(--accent); margin-bottom: 1rem;"></i>
+                    <h4 style="margin-bottom: 0.5rem;">Workbook Merge Macro</h4>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">VBA macro template for consolidating data from multiple Excel workbooks into a single unified report with error handling and deduplication.</p>
+                </div>
+
+                <div style="background: var(--bg-card); border-radius: var(--radius); padding: 2rem; border: 1px solid rgba(255,255,255,0.05);">
+                    <i class="fas fa-robot" style="font-size: 2.5rem; color: #4ecdc4; margin-bottom: 1rem;"></i>
+                    <h4 style="margin-bottom: 0.5rem;">CAD Admin Dashboard</h4>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Tracking dashboard for CAD administration metrics — license utilization, template compliance, and file management across engineering teams.</p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg. All rights reserved.</p>
+    </footer>
+
+    <script src="../js/particles.js"></script>
+    <script src="../js/main.js"></script>
+</body>
+</html>
