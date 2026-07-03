@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Model Viewer | D. Herzberg</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="index.html">D. HERZBERG</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="projects.html">Side Projects</a></li>
+        </ul>
+    </nav>
+
+    <header class="page-header container">
+        <h1>3D Model Viewer</h1>
+        <p>Load a .glb file to inspect it in 3D. Drag and drop a file onto the viewer, or use the button below.</p>
+    </header>
+
+    <section class="viewer-wrap container">
+        <div class="viewer-toolbar">
+            <label class="file-label" for="model-file">
+                <i class="fas fa-upload"></i> Load .glb file
+            </label>
+            <input type="file" id="model-file" accept=".glb,.gltf" hidden>
+            <button class="btn btn-outline" id="toggle-rotate" type="button">
+                <i class="fas fa-sync-alt"></i> Toggle Rotate
+            </button>
+            <button class="btn btn-outline" id="reset-view" type="button">
+                <i class="fas fa-crosshairs"></i> Reset View
+            </button>
+        </div>
+
+        <div id="model-viewer">
+            <div class="model-placeholder">
+                <i class="fas fa-cube"></i>
+                <p>No model loaded</p>
+                <p style="font-size: 0.8rem;">Drop a .glb file here, or use the "Load .glb file" button above</p>
+            </div>
+        </div>
+
+        <p class="viewer-hint">Tip: link directly to a model with <code>viewer.html?model=path/to/file.glb</code></p>
+    </section>
+
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg</p>
+    </footer>
+
+    <script src="js/nav.js"></script>
+    <script type="module" src="js/viewer.js"></script>
+</body>
+</html>

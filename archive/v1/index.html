@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D. Herzberg | Engineering Portfolio</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <!-- Particle Background Canvas -->
+    <canvas id="particle-canvas"></canvas>
+
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-brand">
+            <a href="index.html">D. HERZBERG</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="#hero">Home</a></li>
+            <li><a href="#projects">Projects</a></li>
+            <li><a href="#skills">Skills</a></li>
+            <li><a href="#resume">Resume</a></li>
+            <li><a href="#contact">Contact</a></li>
+        </ul>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="hero" class="hero">
+        <div class="hero-content">
+            <h1 class="glitch" data-text="D. HERZBERG">D. HERZBERG</h1>
+            <p class="hero-subtitle typewriter">Advanced Manufacturing Engineer</p>
+            <p class="hero-tagline">Design for Excellence &bull; Automation &bull; Innovation</p>
+            <a href="#projects" class="cta-btn">
+                <span>View My Work</span>
+                <i class="fas fa-arrow-down"></i>
+            </a>
+        </div>
+        <div class="scroll-indicator">
+            <div class="mouse">
+                <div class="wheel"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Projects Section -->
+    <section id="projects" class="projects">
+        <h2 class="section-title" data-aos="fade-up">Projects</h2>
+        <div class="project-grid">
+            <!-- FlexCell Project -->
+            <a href="projects/flexcell.html" class="project-card" data-aos="fade-up" data-aos-delay="100">
+                <div class="card-image">
+                    <img src="assets/images/flexcell/flexcell-thumb.jpg" alt="FlexCell Robotic System" loading="lazy">
+                    <div class="card-overlay">
+                        <span class="view-project">View Project <i class="fas fa-arrow-right"></i></span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3>FlexCell Robotic System</h3>
+                    <div class="card-tags">
+                        <span>Robotics</span><span>Automation</span><span>3D Design</span>
+                    </div>
+                </div>
+            </a>
+
+            <!-- FLPS Conveyor Project -->
+            <a href="projects/flps.html" class="project-card" data-aos="fade-up" data-aos-delay="200">
+                <div class="card-image">
+                    <img src="assets/images/flps/flps-thumb.jpg" alt="FLPS Roller Module Conveyor" loading="lazy">
+                    <div class="card-overlay">
+                        <span class="view-project">View Project <i class="fas fa-arrow-right"></i></span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3>FLPS Roller Module Conveyor</h3>
+                    <div class="card-tags">
+                        <span>Conveyor Systems</span><span>Material Handling</span>
+                    </div>
+                </div>
+            </a>
+
+            <!-- Nike Autorack Project -->
+            <a href="projects/nike-autorack.html" class="project-card" data-aos="fade-up" data-aos-delay="300">
+                <div class="card-image">
+                    <img src="assets/images/nike/nike-thumb.jpg" alt="Autorack Scanner Bracket" loading="lazy">
+                    <div class="card-overlay">
+                        <span class="view-project">View Project <i class="fas fa-arrow-right"></i></span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3>Autorack Adjustable Scanner Bracket</h3>
+                    <div class="card-tags">
+                        <span>Prototyping</span><span>DFM</span><span>Iteration</span>
+                    </div>
+                </div>
+            </a>
+
+            <!-- Automation Tools Project -->
+            <a href="projects/automation-tools.html" class="project-card" data-aos="fade-up" data-aos-delay="400">
+                <div class="card-image">
+                    <img src="assets/images/automation/automation-thumb.svg" alt="BOM Automation Tools" loading="lazy">
+                    <div class="card-overlay">
+                        <span class="view-project">View Project <i class="fas fa-arrow-right"></i></span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3>Engineering Automation Tools</h3>
+                    <div class="card-tags">
+                        <span>Software</span><span>VBA</span><span>Automation</span>
+                    </div>
+                </div>
+            </a>
+
+            <!-- SolidWorks Rendering Portfolio -->
+            <a href="projects/rendering.html" class="project-card" data-aos="fade-up" data-aos-delay="500">
+                <div class="card-image">
+                    <img src="assets/images/rendering/rendering-thumb.jpg" alt="SolidWorks Photorealistic Rendering" loading="lazy">
+                    <div class="card-overlay">
+                        <span class="view-project">View Project <i class="fas fa-arrow-right"></i></span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3>Photorealistic Rendering</h3>
+                    <div class="card-tags">
+                        <span>SolidWorks Visualize</span><span>PhotoView 360</span><span>Visualization</span>
+                    </div>
+                </div>
+            </a>
+
+            <!-- SolidWorks Surfacing Portfolio -->
+            <a href="projects/surfacing.html" class="project-card" data-aos="fade-up" data-aos-delay="600">
+                <div class="card-image">
+                    <img src="assets/images/surfacing/surfacing-thumb.jpg" alt="SolidWorks Surface Modeling" loading="lazy">
+                    <div class="card-overlay">
+                        <span class="view-project">View Project <i class="fas fa-arrow-right"></i></span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3>Advanced Surface Modeling</h3>
+                    <div class="card-tags">
+                        <span>Surfacing</span><span>Class-A</span><span>Freeform</span>
+                    </div>
+                </div>
+            </a>
+        </div>
+    </section>
+
+    <!-- Skills Section with Animated Bars -->
+    <section id="skills" class="skills">
+        <h2 class="section-title" data-aos="fade-up">Capabilities</h2>
+        <div class="skills-container">
+            <div class="skill-category" data-aos="fade-right">
+                <h3><i class="fas fa-drafting-compass"></i> Design & CAD</h3>
+                <div class="skill-bar"><div class="skill-fill" data-width="95%"><span>SolidWorks</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="85%"><span>GD&T / Tolerancing</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="90%"><span>Sheet Metal Design</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="80%"><span>FEA / Simulation</span></div></div>
+            </div>
+            <div class="skill-category" data-aos="fade-left">
+                <h3><i class="fas fa-industry"></i> Manufacturing</h3>
+                <div class="skill-bar"><div class="skill-fill" data-width="90%"><span>DFM / DFA</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="85%"><span>CNC Machining</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="80%"><span>Welding & Fabrication</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="75%"><span>3D Printing / Rapid Proto</span></div></div>
+            </div>
+            <div class="skill-category" data-aos="fade-right">
+                <h3><i class="fas fa-code"></i> Software & Automation</h3>
+                <div class="skill-bar"><div class="skill-fill" data-width="85%"><span>Python</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="80%"><span>VBA / Excel Automation</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="70%"><span>Web Development</span></div></div>
+                <div class="skill-bar"><div class="skill-fill" data-width="75%"><span>PLM / PDM Systems</span></div></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Resume Section -->
+    <section id="resume" class="resume">
+        <h2 class="section-title" data-aos="fade-up">Resume</h2>
+        <div class="resume-container" data-aos="zoom-in">
+            <div class="resume-preview">
+                <i class="fas fa-file-pdf"></i>
+                <p>Download my resume for full details on experience and education.</p>
+                <!-- Replace href with actual PDF path -->
+                <a href="assets/resume/resume.pdf" class="cta-btn" target="_blank">
+                    <span>Download PDF</span>
+                    <i class="fas fa-download"></i>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section id="contact" class="contact">
+        <h2 class="section-title" data-aos="fade-up">Get In Touch</h2>
+        <div class="contact-links" data-aos="fade-up" data-aos-delay="200">
+            <a href="mailto:placeholder@email.com" class="contact-item">
+                <i class="fas fa-envelope"></i>
+                <span>Email</span>
+            </a>
+            <a href="https://linkedin.com/in/placeholder" target="_blank" class="contact-item">
+                <i class="fab fa-linkedin"></i>
+                <span>LinkedIn</span>
+            </a>
+            <a href="https://github.com/placeholder" target="_blank" class="contact-item">
+                <i class="fab fa-github"></i>
+                <span>GitHub</span>
+            </a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg. All rights reserved.</p>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="js/particles.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
