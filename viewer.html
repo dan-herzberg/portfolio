@@ -1,69 +1,1343 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Model Viewer | D. Herzberg</title>
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-        }
-    }
-    </script>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>GLB Walkthrough | D. Herzberg</title>
+<style>
+  :root{
+    --bg:#101318; --panel:rgba(16,19,24,.88); --line:#2a3140;
+    --text:#cfd6e2; --dim:#7d8798; --accent:#e0a43c; --ok:#5fbf6e;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
+    font-family:"Segoe UI",system-ui,sans-serif;color:var(--text);}
+  canvas{display:block;touch-action:none;}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
+
+  #hud{position:fixed;top:10px;left:10px;z-index:10;display:flex;flex-direction:column;gap:8px;max-width:280px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;backdrop-filter:blur(6px);}
+  .row{display:flex;gap:6px;flex-wrap:wrap;}
+  button{background:#1b2230;color:var(--text);border:1px solid var(--line);border-radius:6px;
+    padding:8px 10px;font-size:13px;cursor:pointer;font-family:inherit;}
+  button:active{transform:translateY(1px);}
+  button.on{background:var(--accent);color:#14100a;border-color:var(--accent);font-weight:600;}
+  .label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:2px 0 6px;}
+  a.navlink{background:#1b2230;color:var(--text);border:1px solid var(--line);border-radius:6px;
+    padding:8px 10px;font-size:13px;font-family:inherit;text-decoration:none;display:inline-block;}
+  a.navlink:hover{border-color:var(--accent);color:var(--accent);}
+
+  #hint{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:10;
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:6px 12px;font-size:13px;color:var(--accent);display:none;}
+  #toasts{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:12;
+    display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;}
+  .toast{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:6px 12px;font-size:13px;opacity:0;transition:opacity .2s;}
+  .toast.show{opacity:1;}
+
+  #reticle{position:fixed;left:50%;top:50%;width:8px;height:8px;margin:-4px;z-index:9;
+    border:2px solid rgba(255,255,255,.65);border-radius:50%;pointer-events:none;display:none;}
+  #reticle.hot{border-color:var(--accent);}
+
+  #help{position:fixed;right:10px;top:10px;z-index:10;max-width:300px;display:none;}
+  #help pre{margin:0;font-size:12px;line-height:1.6;white-space:pre-wrap;color:var(--text);}
+  #helpBtn{position:fixed;right:10px;bottom:10px;z-index:11;width:40px;height:40px;border-radius:50%;font-size:16px;}
+
+  #drop{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+    background:rgba(224,164,60,.12);border:3px dashed var(--accent);font-size:20px;color:var(--accent);}
+
+  /* mobile controls */
+  #mobile{display:none;}
+  #stick{position:fixed;left:24px;bottom:24px;width:120px;height:120px;border-radius:50%;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);z-index:10;}
+  #knob{position:absolute;left:38px;top:38px;width:44px;height:44px;border-radius:50%;
+    background:rgba(224,164,60,.5);}
+  #mbtns{position:fixed;right:14px;bottom:70px;z-index:10;display:flex;flex-direction:column;gap:8px;}
+  #mbtns button{min-width:88px;padding:12px 10px;font-size:13px;}
+  #vslide{position:fixed;right:110px;bottom:70px;z-index:10;display:none;flex-direction:column;gap:8px;}
+
+  #editPanel{position:fixed;left:50%;top:16%;transform:translateX(-50%);width:min(320px,92vw);
+    z-index:12;display:none;}
+  #editPanel button{font-size:12px;padding:7px 8px;}
+
+  #aiBtn{position:fixed;right:58px;bottom:10px;z-index:11;width:40px;height:40px;border-radius:50%;font-size:12px;font-weight:700;}
+  #claudeBar{position:fixed;right:10px;bottom:58px;width:min(360px,92vw);z-index:11;display:none;}
+  #claudeBar input{flex:1;min-width:0;background:#0d1117;border:1px solid var(--line);
+    border-radius:6px;color:var(--text);padding:8px;font-size:13px;font-family:inherit;}
+  #aiLog{font-size:11px;color:var(--dim);max-height:110px;overflow-y:auto;margin-bottom:6px;white-space:pre-wrap;}
+
+  /* VRButton rewrites its own inline position/top/left, including after
+     device-change polling, so pinning it needs a static wrapper plus a
+     watcher, not a one-time CSS override. */
+  #vrWrap{position:fixed;top:10px;right:10px;z-index:10;}
+  #vrWrap .vrbtn{position:static!important;display:block;margin:0;
+    padding:5px 9px;font-size:10px;border-radius:6px;opacity:.55;
+    line-height:1.2;white-space:nowrap;}
+</style>
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-brand">
-            <a href="index.html">D. HERZBERG</a>
-        </div>
-        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
-            <span></span><span></span><span></span>
-        </button>
-        <ul class="nav-links" id="nav-links">
-            <li><a href="index.html">Home</a></li>
-            <li><a href="projects.html">Side Projects</a></li>
-        </ul>
-    </nav>
+<div id="hud">
+  <div class="panel">
+    <div class="label">Scene</div>
+    <div class="row">
+      <button id="btnLoad">Load .glb</button>
+      <button id="btnDemo">Demo room</button>
+      <button id="btnReset">Reset parts</button>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <button id="btnExport">Export edits</button>
+      <button id="btnImport">Import edits</button>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <a class="navlink" href="projects.html">&larr; Side Projects</a>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="label">Movement</div>
+    <div class="row">
+      <button id="mWalk" class="on">Walk</button>
+      <button id="mFly">Fly</button>
+      <button id="mTele">Teleport</button>
+    </div>
+  </div>
+  <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded</div>
+</div>
 
-    <header class="page-header container">
-        <h1>3D Model Viewer</h1>
-        <p>Load a .glb file to inspect it in 3D. Drag and drop a file onto the viewer, or use the button below.</p>
-    </header>
+<div id="help" class="panel">
+<pre>
+DESKTOP
+Click canvas     lock mouse look
+WASD             move
+Space / C        jump | up-down (fly)
+Click            interact / teleport
+E                grab / release part
+Wheel            push-pull held part
+R                snap part to home
+T                edit aimed part (role, hinge)
+1 2 3            walk fly teleport
 
-    <section class="viewer-wrap container">
-        <div class="viewer-toolbar">
-            <label class="file-label" for="model-file">
-                <i class="fas fa-upload"></i> Load .glb file
-            </label>
-            <input type="file" id="model-file" accept=".glb,.gltf" hidden>
-            <button class="btn btn-outline" id="toggle-rotate" type="button">
-                <i class="fas fa-sync-alt"></i> Toggle Rotate
-            </button>
-            <button class="btn btn-outline" id="reset-view" type="button">
-                <i class="fas fa-crosshairs"></i> Reset View
-            </button>
-        </div>
+MOBILE
+Left stick       move
+Drag right side  look
+Buttons          interact grab snap
 
-        <div id="model-viewer">
-            <div class="model-placeholder">
-                <i class="fas fa-cube"></i>
-                <p>No model loaded</p>
-                <p style="font-size: 0.8rem;">Drop a .glb file here, or use the "Load .glb file" button above</p>
-            </div>
-        </div>
+QUEST 2
+Left stick       move
+Right stick      snap turn
+Trigger          interact / teleport
+Grip             grab / release
+A                cycle mode
+X                reset all parts
 
-        <p class="viewer-hint">Tip: link directly to a model with <code>viewer.html?model=path/to/file.glb</code></p>
-    </section>
+AI button (bottom right): natural-language
+commands via your Anthropic API key.
+Edit mode + AI run on flat screens only.
+</pre>
+</div>
+<button id="helpBtn">?</button>
+<button id="aiBtn">AI</button>
 
-    <footer class="footer">
-        <p>&copy; 2026 D. Herzberg</p>
-    </footer>
+<div id="editPanel" class="panel">
+  <div class="label">Edit part</div>
+  <div id="editName" class="mono" style="font-size:12px;margin-bottom:8px;color:var(--accent);"></div>
+  <div class="row" id="editRoles"></div>
+  <div class="row" style="margin-top:8px;">
+    <button id="editHinge">Flip hinge</button>
+    <button id="editClose">Close</button>
+  </div>
+</div>
 
-    <script src="js/nav.js"></script>
-    <script type="module" src="js/viewer.js"></script>
+<div id="claudeBar" class="panel">
+  <div class="label">Claude command</div>
+  <div id="aiLog">Type a command about the scene.</div>
+  <div class="row">
+    <input id="aiInput" placeholder="e.g. make Panel_3 a door hinged right"/>
+    <button id="aiSend">Send</button>
+    <button id="aiGear">Key</button>
+  </div>
+  <div id="aiSettings" style="display:none;margin-top:6px;">
+    <div class="row"><input id="aiKey" type="password" placeholder="Anthropic API key (memory only)"/></div>
+    <div class="row" style="margin-top:6px;"><input id="aiModel" value="claude-sonnet-4-6"/></div>
+  </div>
+</div>
+
+<div id="hint"></div>
+<div id="toasts"></div>
+<div id="reticle"></div>
+<div id="drop">Drop .glb to load</div>
+<div id="vrWrap"></div>
+
+<div id="mobile">
+  <div id="stick"><div id="knob"></div></div>
+  <div id="vslide">
+    <button id="mUp">&#9650; Up</button>
+    <button id="mDown">&#9660; Down</button>
+  </div>
+  <div id="mbtns">
+    <button id="mInteract">Interact</button>
+    <button id="mGrab">Grab</button>
+    <button id="mSnap">Snap</button>
+    <button id="mJump">Jump</button>
+    <button id="mEdit">Edit</button>
+  </div>
+</div>
+
+<input type="file" id="file" accept=".glb,.gltf,.json" hidden>
+<input type="file" id="ovfile" accept=".json" hidden>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+
+/* ============================== core setup ============================== */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14181f);
+scene.fog = new THREE.Fog(0x14181f, 40, 140);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 300);
+camera.rotation.order = 'YXZ';
+
+const player = new THREE.Group();          // locomotion rig
+player.add(camera);
+camera.position.set(0, 1.6, 0);
+scene.add(player);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
+document.body.appendChild(renderer.domElement);
+const vrBtn = VRButton.createButton(renderer);
+vrBtn.classList.add('vrbtn');
+document.getElementById('vrWrap').appendChild(vrBtn);
+// VRButton reassigns style.position/top/left on its own (device polling,
+// session start/end). A one-time class assignment loses that race, so pin
+// it back to static every time the library touches the style attribute.
+const pinVRButton = () => { if (vrBtn.style.position !== 'static') vrBtn.style.position = 'static'; };
+pinVRButton();
+new MutationObserver(pinVRButton).observe(vrBtn, { attributes:true, attributeFilter:['style'] });
+
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a2620, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(6, 12, 4);
+scene.add(sun);
+
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(300, 300).rotateX(-Math.PI/2),
+  new THREE.MeshStandardMaterial({ color:0x1d2129, roughness:1 })
+);
+floor.name = '__floor';
+scene.add(floor);
+const grid = new THREE.GridHelper(300, 150, 0x39414f, 0x272d38);
+grid.position.y = 0.002;
+scene.add(grid);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ============================== state ============================== */
+const MODES = ['walk','fly','teleport'];
+let mode = 'walk';
+let worldRoot = null;
+let collidables = [floor];
+let interactables = [];        // {kind:'door'|'switch', ...}
+let grabbables = [];           // {node, home, homeWorldPos, homeWorldQuat, label}
+let interactMeshes = [];       // meshes -> userData.inter
+let grabMeshes = [];           // meshes -> userData.grab
+let sceneLights = [];
+const held = new Map();        // holder Object3D -> grab record
+const st = { yaw:0, pitch:0, velY:0, grounded:false };
+const keys = {};
+const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpV3 = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
+const UP = new THREE.Vector3(0,1,0);
+const ray = new THREE.Raycaster();
+
+const DOOR_RE = /door|gate|hatch|portal/i;
+const SWITCH_RE = /switch|button|btn|lever|toggle/i;
+const MAX_GRAB_DIM = 5;        // meters, larger top-level parts stay static
+const SNAP_DIST = 0.6, SNAP_ANG = 0.5;
+let walkSpeed = 3.6, flySpeed = 6.5;
+let overrides = { roles:{}, settings:{} };   // roles: path -> {role, hinge}
+let lastSource = null;                       // {kind:'glb', buffer, label} | {kind:'demo'}
+let loadedRoot = null;
+let pathIndex = new Map();                   // path -> node (built before door reparenting)
+let editPath = null, editTarget = null;
+let apiKey = '';
+
+/* ============================== ui helpers ============================== */
+const hintEl = document.getElementById('hint');
+const statsEl = document.getElementById('stats');
+function toast(msg, ms=2200){
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.getElementById('toasts').appendChild(t);
+  requestAnimationFrame(()=>t.classList.add('show'));
+  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(), 300); }, ms);
+}
+function setHint(msg){
+  hintEl.style.display = msg ? 'block' : 'none';
+  if (msg) hintEl.textContent = msg;
+}
+function setMode(m){
+  mode = m;
+  for (const [id,name] of [['mWalk','walk'],['mFly','fly'],['mTele','teleport']])
+    document.getElementById(id).classList.toggle('on', name===m);
+  document.getElementById('vslide').style.display = (isTouch && m==='fly') ? 'flex' : 'none';
+  if (m==='fly') st.velY = 0;
+  toast('Mode: ' + m);
+}
+document.getElementById('mWalk').onclick = ()=>setMode('walk');
+document.getElementById('mFly').onclick = ()=>setMode('fly');
+document.getElementById('mTele').onclick = ()=>setMode('teleport');
+document.getElementById('helpBtn').onclick = ()=>{
+  const h = document.getElementById('help');
+  h.style.display = h.style.display==='block' ? 'none' : 'block';
+};
+document.getElementById('btnReset').onclick = resetAll;
+
+/* ============================== loading ============================== */
+const loader = new GLTFLoader();
+document.getElementById('btnLoad').onclick = ()=>document.getElementById('file').click();
+document.getElementById('file').onchange = e => { if (e.target.files[0]) readFile(e.target.files[0]); };
+addEventListener('dragover', e=>{ e.preventDefault(); document.getElementById('drop').style.display='flex'; });
+addEventListener('dragleave', e=>{ if (!e.relatedTarget) document.getElementById('drop').style.display='none'; });
+addEventListener('drop', e=>{
+  e.preventDefault(); document.getElementById('drop').style.display='none';
+  if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+});
+function readFile(file){
+  if (/\.json$/i.test(file.name)){
+    const r = new FileReader();
+    r.onload = () => importOverrides(r.result, file.name);
+    r.readAsText(file);
+    return;
+  }
+  const r = new FileReader();
+  r.onload = () => {
+    lastSource = { kind:'glb', buffer:r.result, label:file.name };
+    loader.parse(r.result.slice(0), '',
+      g => buildWorld(g.scene, file.name),
+      err => { console.error(err); toast('Parse failed: ' + (err.message||err)); });
+  };
+  r.readAsArrayBuffer(file);
+}
+
+function clearWorld(){
+  for (const h of [...held.keys()]) releaseHeld(h, false);
+  if (worldRoot) scene.remove(worldRoot);
+  worldRoot = null;
+  collidables = [floor];
+  interactables = []; grabbables = [];
+  interactMeshes = []; grabMeshes = [];
+  sceneLights = [];
+}
+
+function buildWorld(root, label, keepPlayer=false){
+  clearWorld();
+  worldRoot = new THREE.Group();
+  worldRoot.name = '__world';
+  worldRoot.add(root);
+  scene.add(worldRoot);
+
+  // recenter: bbox min.y to 0, xz center to origin
+  const box = new THREE.Box3().setFromObject(root);
+  if (!box.isEmpty()){
+    const c = box.getCenter(tmpV);
+    worldRoot.position.set(-c.x, -box.min.y, -c.z);
+    worldRoot.updateMatrixWorld(true);
+  }
+
+  root.traverse(o => { if (o.isLight) sceneLights.push(o); });
+
+  classify(root);
+
+  // collidables: every mesh in world plus fallback floor
+  worldRoot.traverse(o => { if (o.isMesh) collidables.push(o); });
+
+  if (!keepPlayer){
+    // spawn player at scene edge
+    const b2 = new THREE.Box3().setFromObject(worldRoot);
+    const size = b2.getSize(tmpV2);
+    player.position.set(0, 0, Math.min(b2.max.z + 2, b2.max.z + size.z*0.2 + 2));
+    st.yaw = 0; st.pitch = 0; st.velY = 0;
+    applyLook();
+  }
+
+  let tris = 0;
+  worldRoot.traverse(o => { if (o.isMesh && o.geometry?.index) tris += o.geometry.index.count/3;
+    else if (o.isMesh && o.geometry) tris += (o.geometry.attributes.position?.count||0)/3; });
+  statsEl.textContent = `${label} | ${Math.round(tris).toLocaleString()} tris | `
+    + `${interactables.filter(i=>i.kind==='door').length} doors | `
+    + `${interactables.filter(i=>i.kind==='switch').length} switches | `
+    + `${grabbables.length} grabbable parts`;
+  toast('Loaded ' + label);
+  if (document.getElementById('editPanel').style.display==='block' && editPath){
+    editTarget = pathIndex.get(editPath) || null;
+    if (editTarget) renderEditor();
+    else document.getElementById('editPanel').style.display='none';
+  }
+}
+
+/* ============================== classification ============================== */
+function classify(root){
+  loadedRoot = root;
+  pathIndex = new Map();
+  root.traverse(o => { if (o !== root) pathIndex.set(nodePath(o, root), o); });
+
+  // walk tree, highest matching node wins, skip descendants of a match
+  const stack = [...root.children];
+  const doors = [], switches = [], forcedGrabs = [];
+  while (stack.length){
+    const n = stack.pop();
+    const ov = overrides.roles[nodePath(n, root)];
+    if (ov){
+      if (ov.role==='door') doors.push([n, ov.hinge||'left']);
+      else if (ov.role==='switch') switches.push([n, false]);
+      else if (ov.role==='button') switches.push([n, true]);
+      else if (ov.role==='grabbable') forcedGrabs.push(n);
+      else if (ov.role==='static') n.userData.noGrab = true;
+      continue;
+    }
+    if (SWITCH_RE.test(n.name)) { switches.push([n, /button|btn/i.test(n.name)]); continue; }
+    if (DOOR_RE.test(n.name))   { doors.push([n, 'left']); continue; }
+    stack.push(...n.children);
+  }
+  for (const [n, isBtn] of switches) makeSwitch(n, isBtn);
+  for (const [n, hinge] of doors) makeDoor(n, hinge);
+  for (const n of forcedGrabs) registerGrabbable(n);
+
+  // grabbables = remaining top-level children of the loaded root
+  for (const n of root.children){
+    if (n.userData.noGrab || n.userData.grabReg || n.isLight || n.isCamera) continue;
+    const b = new THREE.Box3().setFromObject(n);
+    if (b.isEmpty()) continue;
+    const s = b.getSize(tmpV);
+    if (Math.max(s.x, s.y, s.z) > MAX_GRAB_DIM) continue;   // static architecture
+    let hasMesh = false;
+    n.traverse(o => { if (o.isMesh) hasMesh = true; });
+    if (!hasMesh) continue;
+    registerGrabbable(n);
+  }
+}
+
+function cloneMaterials(node){
+  node.traverse(o => {
+    if (!o.isMesh) return;
+    o.material = Array.isArray(o.material) ? o.material.map(m=>m.clone()) : o.material.clone();
+  });
+}
+function markMeshes(node, key, record, bucket){
+  node.traverse(o => { if (o.isMesh){ o.userData[key] = record; bucket.push(o); } });
+}
+function setGlow(node, hex){
+  node.traverse(o => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) if (m.emissive) m.emissive.setHex(hex);
+  });
+}
+
+function makeDoor(node, hinge='left'){
+  node.userData.noGrab = true;
+  const path = nodePath(node, loadedRoot);
+  cloneMaterials(node);
+  const parent = node.parent;
+  parent.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(node);
+  const size = box.getSize(tmpV);
+  // hinge on a vertical edge along the wider horizontal axis
+  const alongX = size.x >= size.z;
+  const right = hinge === 'right';
+  const hingeV = new THREE.Vector3(
+    alongX ? (right ? box.max.x : box.min.x) : (box.min.x + box.max.x)/2,
+    (box.min.y + box.max.y)/2,
+    alongX ? (box.min.z + box.max.z)/2 : (right ? box.max.z : box.min.z)
+  );
+  const pivot = new THREE.Group();
+  pivot.name = node.name + '__hinge';
+  pivot.userData.noGrab = true;
+  parent.add(pivot);
+  pivot.position.copy(parent.worldToLocal(hingeV.clone()));
+  pivot.updateMatrixWorld(true);
+  pivot.attach(node);
+
+  const center = box.getCenter(new THREE.Vector3());
+  const inter = {
+    kind:'door', label: node.name || 'door', path, hinge,
+    node, pivot,
+    hingeWorld: hingeV.clone(),
+    centerWorld: center,
+    closedY: pivot.rotation.y,
+    open:false, target:0, angle:0
+  };
+  interactables.push(inter);
+  markMeshes(node, 'inter', inter, interactMeshes);
+}
+
+function makeSwitch(node, isButton){
+  node.userData.noGrab = true;
+  const path = nodePath(node, loadedRoot);
+  cloneMaterials(node);
+  const box = new THREE.Box3().setFromObject(node);
+  const size = box.getSize(new THREE.Vector3());
+  if (isButton === undefined) isButton = /button|btn/i.test(node.name);
+  const inter = {
+    kind:'switch', label: node.name || 'switch', path,
+    node, isButton,
+    on:false, anim:0, animT:0,
+    baseScale: node.scale.clone(),
+    baseRot: node.rotation.clone(),
+    pressAxis: (size.x <= size.y && size.x <= size.z) ? 'x' : (size.y <= size.z ? 'y' : 'z'),
+    worldPos: box.getCenter(new THREE.Vector3())
+  };
+  interactables.push(inter);
+  markMeshes(node, 'inter', inter, interactMeshes);
+}
+
+function registerGrabbable(node){
+  if (node.userData.grabReg) return;
+  node.userData.grabReg = true;
+  cloneMaterials(node);
+  node.updateMatrixWorld(true);
+  const rec = {
+    node, label: node.name || 'part',
+    path: nodePath(node, loadedRoot),
+    home: {
+      parent: node.parent,
+      pos: node.position.clone(),
+      quat: node.quaternion.clone(),
+      scale: node.scale.clone()
+    },
+    homeWorldPos: node.getWorldPosition(new THREE.Vector3()),
+    homeWorldQuat: node.getWorldQuaternion(new THREE.Quaternion())
+  };
+  grabbables.push(rec);
+  markMeshes(node, 'grab', rec, grabMeshes);
+}
+
+/* ============================== interaction ============================== */
+function firstHit(hits, skipHeld=true){
+  for (const h of hits){
+    if (!h.object.visible) continue;
+    if (skipHeld && isHeld(h.object)) continue;
+    return h;
+  }
+  return null;
+}
+function isHeld(obj){
+  for (const rec of held.values()){
+    let p = obj;
+    while (p){ if (p === rec.node) return true; p = p.parent; }
+  }
+  return false;
+}
+
+function activate(inter, fromPos){
+  if (inter.kind === 'door'){
+    inter.open = !inter.open;
+    if (inter.open){
+      // swing away from the activator
+      const leafDir = tmpV.copy(inter.centerWorld).sub(inter.hingeWorld); leafDir.y = 0; leafDir.normalize();
+      const tipMove = tmpV2.crossVectors(UP, leafDir);
+      const toUser = tmpV3.copy(fromPos).sub(inter.centerWorld); toUser.y = 0;
+      const sign = tipMove.dot(toUser) > 0 ? -1 : 1;
+      inter.target = sign * 1.78;   // ~102 deg
+    } else inter.target = 0;
+    toast((inter.open?'Opened ':'Closed ') + inter.label);
+  } else {
+    inter.on = !inter.on;
+    inter.animT = 1;
+    setGlow(inter.node, inter.on ? 0x2a8f2a : 0x000000);
+    // toggle lights within 6 m of the switch
+    let hit = 0;
+    for (const L of sceneLights){
+      L.getWorldPosition(tmpV);
+      if (tmpV.distanceTo(inter.worldPos) < 6){ L.visible = inter.on; hit++; }
+    }
+    toast(inter.label + (inter.on?' ON':' OFF') + (hit?` (${hit} light${hit>1?'s':''})`:''));
+  }
+}
+
+function tryInteract(raycaster, fromPos){
+  raycaster.far = 4;
+  const hi = firstHit(raycaster.intersectObjects(interactMeshes, false));
+  if (hi){ activate(hi.object.userData.inter, fromPos); return true; }
+  if (mode === 'teleport'){
+    raycaster.far = 30;
+    const hg = firstHit(raycaster.intersectObjects(collidables, false));
+    if (hg && hg.face && hg.face.normal.clone()
+        .transformDirection(hg.object.matrixWorld).y > 0.6){
+      teleportTo(hg.point);
+      return true;
+    }
+  }
+  return false;
+}
+
+function teleportTo(point){
+  if (renderer.xr.isPresenting){
+    camera.getWorldPosition(tmpV);
+    player.position.x += point.x - tmpV.x;
+    player.position.z += point.z - tmpV.z;
+    player.position.y = point.y;
+  } else {
+    player.position.set(point.x, point.y, point.z);
+  }
+  st.velY = 0;
+}
+
+function grabWith(holder, raycaster){
+  if (held.get(holder)) return releaseHeld(holder);
+  raycaster.far = 4.5;
+  const h = firstHit(raycaster.intersectObjects(grabMeshes, false));
+  if (!h) return;
+  const rec = h.object.userData.grab;
+  if (isHeld(rec.node)) return;   // other hand has this part
+  holder.attach(rec.node);
+  held.set(holder, rec);
+  setGlow(rec.node, 0x3a2f10);
+  toast('Grabbed ' + rec.label);
+}
+
+function releaseHeld(holder, announce=true){
+  const rec = held.get(holder);
+  if (!rec) return;
+  worldRoot ? worldRoot.attach(rec.node) : scene.attach(rec.node);
+  held.delete(holder);
+  setGlow(rec.node, 0x000000);
+  // proximity snap-back
+  rec.node.getWorldPosition(tmpV);
+  rec.node.getWorldQuaternion(tmpQ);
+  const d = tmpV.distanceTo(rec.homeWorldPos);
+  const a = 2*Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
+  if (d < SNAP_DIST && a < SNAP_ANG) snapHome(rec);
+  else if (announce) toast('Released ' + rec.label);
+}
+
+function snapHome(rec){
+  const h = rec.home;
+  h.parent.add(rec.node);
+  rec.node.position.copy(h.pos);
+  rec.node.quaternion.copy(h.quat);
+  rec.node.scale.copy(h.scale);
+  setGlow(rec.node, 0x000000);
+  toast('Snapped ' + rec.label + ' home');
+}
+
+function resetAll(){
+  for (const holder of [...held.keys()]) releaseHeld(holder, false);
+  for (const rec of grabbables) snapHome(rec);
+  for (const i of interactables){
+    if (i.kind==='door'){ i.open=false; i.target=0; }
+    else if (i.on){ i.on=false; setGlow(i.node,0x000000);
+      for (const L of sceneLights){ L.getWorldPosition(tmpV);
+        if (tmpV.distanceTo(i.worldPos) < 6) L.visible = false; } }
+  }
+  toast('All parts reset');
+}
+
+/* ============================== node paths & rebuild ============================== */
+function nodePath(node, root){
+  const parts = [];
+  let n = node;
+  while (n && n !== root && n !== worldRoot && n !== scene){
+    if (!/__hinge$/.test(n.name || '')){
+      const p = n.parent;
+      let seg = n.name || '';
+      if (p){
+        const twins = p.children.filter(c => (c.name||'') === (n.name||'') && !/__hinge$/.test(c.name||''));
+        if (!seg || twins.length > 1) seg = (seg || 'node') + '#' + p.children.indexOf(n);
+      }
+      parts.unshift(seg);
+    }
+    n = n.parent;
+  }
+  return parts.join('/');
+}
+function pathFor(node){
+  for (const i of interactables) if (i.node === node) return i.path;
+  for (const g of grabbables) if (g.node === node) return g.path;
+  return nodePath(node, loadedRoot);
+}
+function currentRole(node){
+  for (const i of interactables){
+    if (i.node === node) return i.kind==='door' ? 'door' : (i.isButton ? 'button' : 'switch');
+  }
+  for (const g of grabbables) if (g.node === node) return 'grabbable';
+  return 'static';
+}
+function rebuildWorld(){
+  if (!lastSource) return;
+  if (lastSource.kind === 'demo') buildDemo(true);
+  else loader.parse(lastSource.buffer.slice(0), '',
+    g => buildWorld(g.scene, lastSource.label, true),
+    err => { console.error(err); toast('Rebuild failed'); });
+}
+function applyOverrideSettings(){
+  const s = overrides.settings || {};
+  if (s.walkSpeed > 0) walkSpeed = Math.min(s.walkSpeed, 15);
+  if (s.flySpeed > 0)  flySpeed  = Math.min(s.flySpeed, 30);
+}
+
+/* ============================== in-situ editor ============================== */
+const ROLES = ['door','switch','button','grabbable','static'];
+const editPanel = document.getElementById('editPanel');
+function openEditor(){
+  if (!worldRoot){ toast('Load a scene first'); return; }
+  if (editPanel.style.display === 'block'){ editPanel.style.display='none'; return; }
+  const r = centerRay(); r.far = 8;
+  const meshes = [];
+  worldRoot.traverse(o => { if (o.isMesh) meshes.push(o); });
+  const h = firstHit(r.intersectObjects(meshes, false));
+  if (!h){ toast('Aim the reticle at a part, then press T / Edit'); return; }
+  // highest named ancestor below the loaded root
+  let n = h.object, best = null;
+  while (n && n !== loadedRoot && n !== worldRoot){
+    if (n.name && !/__hinge$/.test(n.name)) best = n;
+    n = n.parent;
+  }
+  editTarget = best || h.object;
+  editPath = pathFor(editTarget);
+  renderEditor();
+  editPanel.style.display = 'block';
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function renderEditor(){
+  const role = currentRole(editTarget);
+  const ov = overrides.roles[editPath];
+  document.getElementById('editName').textContent =
+    (editTarget.name || editPath) + '  [' + role + (ov ? ', edited' : '') + ']';
+  const row = document.getElementById('editRoles');
+  row.innerHTML = '';
+  for (const rr of ROLES){
+    const b = document.createElement('button');
+    b.textContent = rr;
+    if (rr === role) b.classList.add('on');
+    b.onclick = () => setRoleOverride(editPath, rr);
+    row.appendChild(b);
+  }
+  document.getElementById('editHinge').style.display = role==='door' ? '' : 'none';
+}
+function setRoleOverride(path, role, hinge){
+  const prev = overrides.roles[path] || {};
+  overrides.roles[path] = { role, hinge: hinge || prev.hinge || 'left' };
+  rebuildWorld();
+}
+document.getElementById('editHinge').onclick = () => {
+  const prev = overrides.roles[editPath] || { role:'door', hinge:'left' };
+  prev.role = 'door';
+  prev.hinge = prev.hinge === 'right' ? 'left' : 'right';
+  overrides.roles[editPath] = prev;
+  toast('Hinge: ' + prev.hinge);
+  rebuildWorld();
+};
+document.getElementById('editClose').onclick = () => editPanel.style.display = 'none';
+
+/* ============================== overrides file i/o ============================== */
+document.getElementById('btnExport').onclick = () => {
+  const blob = new Blob([JSON.stringify(overrides, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = ((lastSource && lastSource.label) || 'scene').replace(/\.(glb|gltf)$/i,'') + '.overrides.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Overrides exported');
+};
+document.getElementById('btnImport').onclick = () => document.getElementById('ovfile').click();
+document.getElementById('ovfile').onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => importOverrides(r.result, f.name);
+  r.readAsText(f);
+  e.target.value = '';
+};
+function importOverrides(text, name){
+  try {
+    const data = JSON.parse(text);
+    if (!data.roles && !data.settings) throw new Error('missing roles/settings keys');
+    overrides = { roles: data.roles || {}, settings: data.settings || {} };
+    applyOverrideSettings();
+    toast('Imported ' + name + ' (' + Object.keys(overrides.roles).length + ' role edits)');
+    if (lastSource) rebuildWorld();
+  } catch (err){
+    toast('Bad overrides file: ' + err.message);
+  }
+}
+
+/* ============================== Claude command bridge ============================== */
+const aiBar = document.getElementById('claudeBar');
+const aiLog = document.getElementById('aiLog');
+document.getElementById('aiBtn').onclick = () => {
+  aiBar.style.display = aiBar.style.display==='block' ? 'none' : 'block';
+  if (aiBar.style.display==='block' && document.pointerLockElement) document.exitPointerLock();
+};
+document.getElementById('aiGear').onclick = () => {
+  const s = document.getElementById('aiSettings');
+  s.style.display = s.style.display==='none' ? 'block' : 'none';
+};
+document.getElementById('aiKey').oninput = e => apiKey = e.target.value.trim();
+document.getElementById('aiSend').onclick = () => runCommand();
+document.getElementById('aiInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runCommand();
+});
+function logAI(msg){
+  aiLog.textContent = msg;
+}
+function sceneInventory(){
+  const inv = [];
+  for (const i of interactables) inv.push({
+    path: i.path,
+    role: i.kind==='door' ? 'door' : (i.isButton ? 'button' : 'switch'),
+    state: i.kind==='door' ? (i.open?'open':'closed') : (i.on?'on':'off'),
+    hinge: i.hinge
+  });
+  for (const g of grabbables) inv.push({ path: g.path, role:'grabbable' });
+  let count = inv.length;
+  pathIndex.forEach((node, path) => {
+    if (count >= 240 || !node.name) return;
+    if (path.split('/').length > 2) return;
+    if (inv.some(e => e.path === path)) return;
+    inv.push({ path, role:'static' });
+    count++;
+  });
+  return inv;
+}
+async function runCommand(){
+  const input = document.getElementById('aiInput');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!apiKey){
+    document.getElementById('aiSettings').style.display = 'block';
+    logAI('Paste your Anthropic API key first. The key lives in memory only and clears on reload.');
+    return;
+  }
+  if (!worldRoot){ logAI('Load a scene first.'); return; }
+  const btn = document.getElementById('aiSend');
+  btn.disabled = true; btn.textContent = '...';
+  logAI('Thinking...');
+  const sys =
+    'You are the control brain of a WebXR GLB walkthrough app. The user gives a natural-language command about the loaded 3D scene. ' +
+    'Respond with ONLY valid JSON, no markdown fences, no prose, in the form {"ops":[...],"note":"one short confirmation sentence"}. ' +
+    'Allowed ops: ' +
+    '{"op":"setRole","path":P,"role":"door|switch|button|grabbable|static","hinge":"left|right"} converts a node (hinge only for doors). ' +
+    '{"op":"flipHinge","path":P} flips a door hinge side. ' +
+    '{"op":"setDoorState","path":P,"open":true|false}. ' +
+    '{"op":"setSwitch","path":P,"on":true|false}. ' +
+    '{"op":"snapPart","path":P} returns a part to its home position. ' +
+    '{"op":"snapAll"} resets every part, door, and switch. ' +
+    '{"op":"setMode","mode":"walk|fly|teleport"}. ' +
+    '{"op":"setSpeed","walk":number,"fly":number} in m/s, either key optional. ' +
+    'Use only paths from this inventory, matched by closest name. Inventory: ' + JSON.stringify(sceneInventory()) +
+    ' Current mode: ' + mode + ', walkSpeed ' + walkSpeed + ', flySpeed ' + flySpeed + '.';
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: document.getElementById('aiModel').value.trim() || 'claude-sonnet-4-6',
+        max_tokens: 1500,
+        system: sys,
+        messages: [{ role:'user', content: text }]
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message || 'API error');
+    const raw = (data.content || []).filter(b => b.type==='text').map(b => b.text).join('\n');
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean);
+    const n = applyOps(parsed.ops || []);
+    logAI((parsed.note || 'Done.') + ' (' + n + ' op' + (n===1?'':'s') + ' applied)');
+    input.value = '';
+  } catch (err){
+    console.error(err);
+    logAI('Failed: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send';
+  }
+}
+function applyOps(ops){
+  let applied = 0, needRebuild = false;
+  camera.getWorldPosition(tmpV3);
+  const camPos = tmpV3.clone();
+  for (const op of ops){
+    switch (op.op){
+      case 'setRole':
+        if (op.path && ROLES.includes(op.role)){
+          const prev = overrides.roles[op.path] || {};
+          overrides.roles[op.path] = { role: op.role, hinge: op.hinge || prev.hinge || 'left' };
+          needRebuild = true; applied++;
+        }
+        break;
+      case 'flipHinge': {
+        const prev = overrides.roles[op.path] || { role:'door', hinge:'left' };
+        prev.role = 'door';
+        prev.hinge = prev.hinge === 'right' ? 'left' : 'right';
+        overrides.roles[op.path] = prev;
+        needRebuild = true; applied++;
+        break;
+      }
+      case 'setDoorState': {
+        const d = interactables.find(i => i.kind==='door' && i.path===op.path);
+        if (d && d.open !== !!op.open){ activate(d, camPos); applied++; }
+        break;
+      }
+      case 'setSwitch': {
+        const s = interactables.find(i => i.kind==='switch' && i.path===op.path);
+        if (s && s.on !== !!op.on){ activate(s, camPos); applied++; }
+        break;
+      }
+      case 'snapPart': {
+        const g = grabbables.find(g => g.path===op.path);
+        if (g){ snapHome(g); applied++; }
+        break;
+      }
+      case 'snapAll': resetAll(); applied++; break;
+      case 'setMode':
+        if (MODES.includes(op.mode)){ setMode(op.mode); applied++; }
+        break;
+      case 'setSpeed':
+        if (op.walk > 0) walkSpeed = Math.min(op.walk, 15);
+        if (op.fly > 0)  flySpeed  = Math.min(op.fly, 30);
+        overrides.settings = { walkSpeed, flySpeed };
+        applied++;
+        break;
+    }
+  }
+  if (needRebuild) rebuildWorld();
+  return applied;
+}
+
+/* ============================== desktop input ============================== */
+const isTouch = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
+if (isTouch) document.getElementById('mobile').style.display = 'block';
+else document.getElementById('reticle').style.display = 'block';
+
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  keys[e.code] = true;
+  if (e.code==='Digit1') setMode('walk');
+  if (e.code==='Digit2') setMode('fly');
+  if (e.code==='Digit3') setMode('teleport');
+  if (e.code==='KeyT') openEditor();
+  if (e.code==='KeyE') grabWith(camera, centerRay());
+  if (e.code==='KeyR'){
+    const rec = held.get(camera);
+    if (rec){ held.delete(camera); snapHome(rec); }
+    else {
+      const r = centerRay(); r.far = 4.5;
+      const h = firstHit(r.intersectObjects(grabMeshes, false));
+      if (h) snapHome(h.object.userData.grab);
+    }
+  }
+});
+addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('wheel', e => {
+  const rec = held.get(camera);
+  if (!rec) return;
+  rec.node.position.z = THREE.MathUtils.clamp(
+    rec.node.position.z + Math.sign(e.deltaY)*0.12, -6, -0.35);
+});
+
+function centerRay(){ ray.setFromCamera({x:0,y:0}, camera); return ray; }
+
+renderer.domElement.addEventListener('click', () => {
+  if (isTouch || renderer.xr.isPresenting) return;
+  if (document.pointerLockElement !== renderer.domElement){
+    renderer.domElement.requestPointerLock();
+    return;
+  }
+  camera.getWorldPosition(tmpV3);
+  tryInteract(centerRay(), tmpV3.clone());
+});
+addEventListener('mousemove', e => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  st.yaw   -= e.movementX * 0.0022;
+  st.pitch = THREE.MathUtils.clamp(st.pitch - e.movementY*0.0022, -1.45, 1.45);
+  applyLook();
+});
+function applyLook(){
+  player.rotation.y = st.yaw;
+  camera.rotation.set(st.pitch, 0, 0);
+}
+
+/* ============================== mobile input ============================== */
+const joy = { active:false, id:null, cx:0, cy:0, x:0, y:0 };
+const look = { id:null, lx:0, ly:0 };
+const stickEl = document.getElementById('stick'), knob = document.getElementById('knob');
+let mUpHeld=false, mDownHeld=false;
+
+if (isTouch){
+  stickEl.addEventListener('touchstart', e => {
+    const t = e.changedTouches[0];
+    joy.active = true; joy.id = t.identifier;
+    const r = stickEl.getBoundingClientRect();
+    joy.cx = r.left + r.width/2; joy.cy = r.top + r.height/2;
+    e.preventDefault();
+  }, {passive:false});
+  addEventListener('touchmove', e => {
+    for (const t of e.changedTouches){
+      if (joy.active && t.identifier === joy.id){
+        joy.x = THREE.MathUtils.clamp((t.clientX - joy.cx)/45, -1, 1);
+        joy.y = THREE.MathUtils.clamp((t.clientY - joy.cy)/45, -1, 1);
+        knob.style.left = (38 + joy.x*34) + 'px';
+        knob.style.top  = (38 + joy.y*34) + 'px';
+      } else if (t.identifier === look.id){
+        st.yaw   -= (t.clientX - look.lx) * 0.005;
+        st.pitch = THREE.MathUtils.clamp(st.pitch - (t.clientY - look.ly)*0.005, -1.45, 1.45);
+        look.lx = t.clientX; look.ly = t.clientY;
+        applyLook();
+      }
+    }
+  }, {passive:true});
+  addEventListener('touchend', e => {
+    for (const t of e.changedTouches){
+      if (t.identifier === joy.id){ joy.active=false; joy.x=joy.y=0;
+        knob.style.left='38px'; knob.style.top='38px'; }
+      if (t.identifier === look.id) look.id = null;
+    }
+  });
+  renderer.domElement.addEventListener('touchstart', e => {
+    const t = e.changedTouches[0];
+    if (t.clientX > innerWidth*0.4 && look.id === null){
+      look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
+    }
+  }, {passive:true});
+
+  const hold = (id, on, off) => {
+    const b = document.getElementById(id);
+    b.addEventListener('touchstart', e=>{ e.preventDefault(); on(); }, {passive:false});
+    b.addEventListener('touchend', ()=>off && off());
+  };
+  hold('mInteract', ()=>{ camera.getWorldPosition(tmpV3); tryInteract(centerRay(), tmpV3.clone()); });
+  hold('mGrab', ()=>grabWith(camera, centerRay()));
+  hold('mSnap', ()=>{
+    const rec = held.get(camera);
+    if (rec){ held.delete(camera); snapHome(rec); }
+  });
+  hold('mJump', ()=>{ if (mode==='walk' && st.grounded) st.velY = 4.4; });
+  hold('mEdit', ()=>openEditor());
+  hold('mUp', ()=>mUpHeld=true, ()=>mUpHeld=false);
+  hold('mDown', ()=>mDownHeld=true, ()=>mDownHeld=false);
+}
+
+/* ============================== VR ============================== */
+const cmf = new XRControllerModelFactory();
+const controllers = [];
+for (let i=0;i<2;i++){
+  const c = renderer.xr.getController(i);
+  const grip = renderer.xr.getControllerGrip(i);
+  grip.add(cmf.createControllerModel(grip));
+  player.add(c); player.add(grip);
+  const laser = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0,0,-1)]),
+    new THREE.LineBasicMaterial({ color:0x8899aa }));
+  laser.scale.z = 5;
+  c.add(laser);
+  c.userData.laser = laser;
+  c.userData.grip = grip;
+  c.addEventListener('selectstart', ()=>onVRTrigger(c));
+  c.addEventListener('squeezestart', ()=>grabWith(grip, rayFrom(c)));
+  c.addEventListener('squeezeend', ()=>releaseHeld(grip));
+  controllers.push(c);
+}
+function rayFrom(c){
+  tmpM.identity().extractRotation(c.matrixWorld);
+  ray.ray.origin.setFromMatrixPosition(c.matrixWorld);
+  ray.ray.direction.set(0,0,-1).applyMatrix4(tmpM);
+  return ray;
+}
+function onVRTrigger(c){
+  c.getWorldPosition(tmpV3);
+  tryInteract(rayFrom(c), tmpV3.clone());
+}
+const xrLatch = { snap:0, modeBtn:false, resetBtn:false };
+function pollXRInput(dt){
+  const session = renderer.xr.getSession();
+  if (!session) return { mx:0, mz:0 };
+  let mx=0, mz=0;
+  for (const src of session.inputSources){
+    const gp = src.gamepad;
+    if (!gp) continue;
+    if (src.handedness === 'left'){
+      mx = gp.axes[2] || 0; mz = gp.axes[3] || 0;
+      const x = gp.buttons[4];   // X
+      if (x?.pressed && !xrLatch.resetBtn) resetAll();
+      xrLatch.resetBtn = !!x?.pressed;
+    } else if (src.handedness === 'right'){
+      const sx = gp.axes[2] || 0;
+      if (Math.abs(sx) > 0.6 && xrLatch.snap === 0){
+        xrLatch.snap = Math.sign(sx);
+        snapTurn(-Math.sign(sx) * Math.PI/6);
+      } else if (Math.abs(sx) < 0.3) xrLatch.snap = 0;
+      const a = gp.buttons[4];   // A
+      if (a?.pressed && !xrLatch.modeBtn)
+        setMode(MODES[(MODES.indexOf(mode)+1)%MODES.length]);
+      xrLatch.modeBtn = !!a?.pressed;
+    }
+  }
+  return { mx, mz };
+}
+function snapTurn(angle){
+  camera.getWorldPosition(tmpV);
+  const px = player.position.x - tmpV.x, pz = player.position.z - tmpV.z;
+  const s = Math.sin(angle), c = Math.cos(angle);
+  player.position.x = tmpV.x + px*c - pz*s;
+  player.position.z = tmpV.z + px*s + pz*c;
+  player.rotation.y += angle;
+}
+function updateLasers(){
+  for (const c of controllers){
+    const r = rayFrom(c);
+    r.far = 4.5;
+    const hi = firstHit(r.intersectObjects(interactMeshes, false));
+    const hg = hi ? null : firstHit(r.intersectObjects(grabMeshes, false));
+    c.userData.laser.material.color.setHex(hi ? 0xe0a43c : hg ? 0x5fbf6e : 0x8899aa);
+    c.userData.laser.scale.z = hi ? hi.distance : hg ? hg.distance : 5;
+  }
+}
+
+/* ============================== movement ============================== */
+function currentGroundY(x, z, fromY){
+  ray.ray.origin.set(x, fromY + 1.9, z);
+  ray.ray.direction.set(0,-1,0);
+  ray.far = 6;
+  const h = firstHit(ray.intersectObjects(collidables, false));
+  return h ? h.point.y : 0;
+}
+function tryMove(dx, dz){
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-6) return;
+  const inXR = renderer.xr.isPresenting;
+  const px = inXR ? camera.getWorldPosition(tmpV2).x : player.position.x;
+  const pz = inXR ? tmpV2.z : player.position.z;
+  const py = player.position.y;
+  for (const h of [0.35, 1.15]){
+    ray.ray.origin.set(px, py + h, pz);
+    ray.ray.direction.set(dx/len, 0, dz/len);
+    ray.far = len + 0.35;
+    const hit = firstHit(ray.intersectObjects(collidables, false));
+    if (hit){
+      const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      n.y = 0; n.normalize();
+      const dot = dx*n.x + dz*n.z;
+      dx -= n.x*dot; dz -= n.z*dot;   // slide along wall
+    }
+  }
+  player.position.x += dx;
+  player.position.z += dz;
+}
+
+function updateMovement(dt){
+  const inXR = renderer.xr.isPresenting;
+  let ix=0, iz=0, iy=0;
+  if (keys['KeyW']) iz -= 1;
+  if (keys['KeyS']) iz += 1;
+  if (keys['KeyA']) ix -= 1;
+  if (keys['KeyD']) ix += 1;
+  if (mode==='fly'){
+    if (keys['Space']) iy += 1;
+    if (keys['KeyC'] || keys['ShiftLeft']) iy -= 1;
+    if (mUpHeld) iy += 1;
+    if (mDownHeld) iy -= 1;
+  } else if (keys['Space'] && st.grounded){ st.velY = 4.4; st.grounded = false; }
+  ix += joy.x; iz += joy.y;
+
+  let xr = { mx:0, mz:0 };
+  if (inXR){ xr = pollXRInput(dt); ix += xr.mx; iz += xr.mz; }
+
+  const L = Math.hypot(ix, iz);
+  if (L > 1){ ix/=L; iz/=L; }
+
+  const speed = mode==='fly' ? flySpeed : walkSpeed;
+  let yaw;
+  if (inXR){ camera.getWorldDirection(tmpV); yaw = Math.atan2(-tmpV.x, -tmpV.z); }
+  else yaw = st.yaw;
+  // forward key gives iz=-1; camera forward = (-sin(yaw), 0, -cos(yaw))
+  const sin = Math.sin(yaw), cos = Math.cos(yaw);
+  const dx = (ix*cos + iz*sin) * speed * dt;
+  const dz = (iz*cos - ix*sin) * speed * dt;
+
+  if (mode==='fly'){
+    st.velY = 0;
+    tryMove(dx, dz);
+    player.position.y = Math.max(0, player.position.y + iy*speed*dt);
+  } else {
+    tryMove(dx, dz);
+    const cx = inXR ? camera.getWorldPosition(tmpV2).x : player.position.x;
+    const cz = inXR ? tmpV2.z : player.position.z;
+    const gy = currentGroundY(cx, cz, player.position.y);
+    st.velY -= 9.8*dt;
+    player.position.y += st.velY*dt;
+    if (player.position.y <= gy + 0.02 && st.velY <= 0){
+      // step limit: refuse pop-ups taller than 0.5 m
+      if (gy - (player.position.y - st.velY*dt) < 0.55){
+        player.position.y = gy; st.velY = 0; st.grounded = true;
+      } else { player.position.y = Math.max(player.position.y, 0); st.velY = 0; }
+    } else st.grounded = false;
+    if (player.position.y < -20){ player.position.set(0,2,4); st.velY=0; }
+  }
+}
+
+/* ============================== hover / hints ============================== */
+const reticle = document.getElementById('reticle');
+function updateHover(){
+  if (renderer.xr.isPresenting){ updateLasers(); setHint(''); return; }
+  const r = centerRay();
+  r.far = 4;
+  const hi = firstHit(r.intersectObjects(interactMeshes, false));
+  if (hi){
+    const it = hi.object.userData.inter;
+    reticle.classList.add('hot');
+    setHint((isTouch?'Interact':'Click') + ': ' +
+      (it.kind==='door' ? (it.open?'close ':'open ') : 'toggle ') + it.label);
+    return;
+  }
+  r.far = 4.5;
+  const hg = firstHit(r.intersectObjects(grabMeshes, false));
+  if (hg){
+    reticle.classList.add('hot');
+    setHint((isTouch?'Grab':'E') + ': grab ' + hg.object.userData.grab.label);
+    return;
+  }
+  reticle.classList.remove('hot');
+  setHint(held.get(camera) ? ((isTouch?'Snap':'E release, R snap') + ' — holding ' + held.get(camera).label) : '');
+}
+
+/* ============================== animation loop ============================== */
+const clock = new THREE.Clock();
+let hoverTick = 0;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  updateMovement(dt);
+
+  for (const i of interactables){
+    if (i.kind==='door'){
+      i.angle = THREE.MathUtils.damp(i.angle, i.target, 6, dt);
+      i.pivot.rotation.y = i.closedY + i.angle;
+    } else if (i.animT > 0){
+      i.animT = Math.max(0, i.animT - dt*4);
+      const k = Math.sin(i.animT * Math.PI);
+      if (i.isButton){
+        const s = 1 - 0.35*k;
+        i.node.scale.copy(i.baseScale);
+        i.node.scale[i.pressAxis] *= s;
+      } else {
+        i.node.rotation.copy(i.baseRot);
+        i.node.rotation.x = i.baseRot.x + (i.on ? 0.45 : -0.45) * (1 - i.animT);
+      }
+    }
+  }
+
+  hoverTick += dt;
+  if (hoverTick > 0.08){ hoverTick = 0; updateHover(); }
+
+  renderer.render(scene, camera);
+});
+
+/* ============================== demo scene ============================== */
+document.getElementById('btnDemo').onclick = () => buildDemo(false);
+function buildDemo(keepPlayer=false){
+  const M = (c, r=0.7, m=0.1) => new THREE.MeshStandardMaterial({ color:c, roughness:r, metalness:m });
+  const root = new THREE.Group(); root.name = 'DemoRoom';
+
+  const walls = new THREE.Group(); walls.name = 'Structure'; walls.userData.noGrab = true;
+  const wallMat = M(0x39414d, 0.95, 0);
+  const mk = (w,h,d,x,y,z,mat=wallMat,parent=walls) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+    b.position.set(x,y,z); parent.add(b); return b;
+  };
+  // room 8x6, opening in front wall for the door
+  mk(8,0.15,6, 0,0.075,0);                       // slab
+  mk(8,2.6,0.15, 0,1.3,-3);                      // back
+  mk(0.15,2.6,6, -4,1.3,0);                      // left
+  mk(0.15,2.6,6,  4,1.3,0);                      // right
+  mk(3.45,2.6,0.15, -2.25,1.3,3);                // front left of opening
+  mk(3.45,2.6,0.15,  2.25,1.3,3);                // front right of opening
+  mk(1.1,0.42,0.15, 0,2.39,3);                   // header
+  root.add(walls);
+
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.04,2.16,0.06), M(0x8a5a2b,0.8,0));
+  door.name = 'Door_Main';
+  door.position.set(0,1.16,3);
+  const knobM = new THREE.Mesh(new THREE.SphereGeometry(0.035), M(0xd8c060,0.3,0.8));
+  knobM.position.set(0.42,0,0.05); door.add(knobM);
+  root.add(door);
+
+  // yard gate between posts
+  mk(0.12,1.3,0.12, -1.2,0.65,6, M(0x555f6d));
+  mk(0.12,1.3,0.12,  1.2,0.65,6, M(0x555f6d));
+  const gate = new THREE.Mesh(new THREE.BoxGeometry(2.24,1.1,0.05), M(0x6d7684,0.6,0.4));
+  gate.name = 'Gate_Yard';
+  gate.position.set(0,0.62,6);
+  root.add(gate);
+
+  // pedestal + red button
+  mk(0.3,0.9,0.3, -2.6,0.45,1.6, M(0x2c3340), root);
+  const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.05,24), M(0xc03030,0.4,0.2));
+  btn.name = 'Button_Red';
+  btn.position.set(-2.6,0.93,1.6);
+  root.add(btn);
+
+  // wall lever
+  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.3,0.06), M(0xc7cdd6,0.35,0.7));
+  lever.name = 'Switch_Lever';
+  lever.position.set(3.9,1.35,1.2);
+  root.add(lever);
+
+  // lamp toggled by the button (within 6 m)
+  const lamp = new THREE.PointLight(0xffd9a0, 18, 12);
+  lamp.name = 'Lamp'; lamp.visible = false;
+  lamp.position.set(-2.2,2.2,0.8);
+  root.add(lamp);
+
+  // workbench with grabbable parts
+  mk(1.8,0.08,0.9, 1.8,0.85,-1.6, M(0x4a3c2c,0.85,0), root);
+  mk(0.08,0.85,0.08, 1.0,0.42,-1.3, M(0x33291d), root);
+  mk(0.08,0.85,0.08, 2.6,0.42,-1.3, M(0x33291d), root);
+  mk(0.08,0.85,0.08, 1.0,0.42,-1.9, M(0x33291d), root);
+  mk(0.08,0.85,0.08, 2.6,0.42,-1.9, M(0x33291d), root);
+
+  const gear = new THREE.Mesh(new THREE.TorusGeometry(0.14,0.05,10,24), M(0x9aa4b2,0.3,0.85));
+  gear.name = 'Gear_A'; gear.rotation.x = Math.PI/2;
+  gear.position.set(1.35,0.95,-1.6); root.add(gear);
+
+  const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.1,0.14), M(0xd0642e,0.5,0.3));
+  bracket.name = 'Bracket_B';
+  bracket.position.set(1.85,0.95,-1.5); root.add(bracket);
+
+  const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.24,20), M(0x4f86c6,0.45,0.5));
+  housing.name = 'Housing_C';
+  housing.position.set(2.35,1.01,-1.7); root.add(housing);
+
+  lastSource = { kind:'demo' };
+  buildWorld(root, 'demo room', keepPlayer);
+  if (!keepPlayer) toast('Demo: door, gate, button, lever, 3 parts on the bench');
+}
+
+toast('Load a .glb, or open the demo room');
+</script>
 </body>
 </html>
