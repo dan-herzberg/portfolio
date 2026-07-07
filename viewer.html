@@ -212,8 +212,8 @@ Edit mode + AI run on flat screens only.
 <div id="mobile">
   <div id="stick"><div id="knob"></div></div>
   <div id="vslide">
-    <button id="mUp">&#9650; Up</button>
-    <button id="mDown">&#9660; Down</button>
+    <button id="mUp">▲ Up</button>
+    <button id="mDown">▼ Down</button>
   </div>
   <div id="mbtns">
     <button id="mInteract">Interact</button>
@@ -303,7 +303,6 @@ let interactMeshes = [];       // meshes -> userData.inter
 let grabMeshes = [];           // meshes -> userData.grab
 let sceneLights = [];
 const held = new Map();        // holder Object3D -> grab record
-const drops = [];               // {node, fromY, toY, t, duration} in-flight drop-bounce animations
 let hoveredGrab = null;        // currently aimed-at grabbable, for hover highlight
 const HOVER_GLOW = 0x24303f;   // cool, dim: distinct from held (amber) and switch-on (green)
 const st = { yaw:0, pitch:0, velY:0, grounded:false };
@@ -317,6 +316,7 @@ const DOOR_RE = /door|gate|hatch|portal/i;
 const SWITCH_RE = /switch|button|btn|lever|toggle/i;
 const SNAP_DIST = 0.6, SNAP_ANG = 0.5;
 let walkSpeed = 3.6, flySpeed = 6.5;
+const dropping = [];           // {node, vel:Vector3, angVel:Vector3, bounces:0, settled:false}
 let overrides = { roles:{}, settings:{} };   // roles: path -> {role, hinge}
 let lastSource = null;                       // {kind:'glb', buffer, label} | {kind:'demo'}
 let loadedRoot = null;
@@ -450,6 +450,7 @@ function readFile(file){
 
 function clearWorld(){
   for (const h of [...held.keys()]) releaseHeld(h, false);
+  dropping.length = 0;
   if (worldRoot) scene.remove(worldRoot);
   worldRoot = null;
   collidables = [floor];
@@ -457,7 +458,6 @@ function clearWorld(){
   interactMeshes = []; grabMeshes = [];
   sceneLights = [];
   hoveredGrab = null;
-  drops.length = 0;
 }
 
 function countTris(){
@@ -741,31 +741,6 @@ function isDescendantOf(obj, ancestor){
   while (p){ if (p === ancestor) return true; p = p.parent; }
   return false;
 }
-function easeOutBounce(t){
-  const n1 = 7.5625, d1 = 2.75;
-  if (t < 1/d1) return n1*t*t;
-  if (t < 2/d1) { t -= 1.5/d1; return n1*t*t + 0.75; }
-  if (t < 2.5/d1) { t -= 2.25/d1; return n1*t*t + 0.9375; }
-  t -= 2.625/d1; return n1*t*t + 0.984375;
-}
-function dropRelease(rec){
-  const node = rec.node;
-  const worldPos = node.getWorldPosition(tmpV3).clone();
-  const box = new THREE.Box3().setFromObject(node);
-  if (box.isEmpty()) return false;
-  const bottomOffset = worldPos.y - box.min.y;
-  ray.ray.origin.set(worldPos.x, box.min.y + 0.3, worldPos.z);
-  ray.ray.direction.set(0, -1, 0);
-  ray.far = 20;
-  const targets = collidables.filter(o => !isDescendantOf(o, node));
-  const hit = firstHit(ray.intersectObjects(targets, false));
-  if (!hit) return false;
-  const targetWorldY = hit.point.y + bottomOffset;
-  if (Math.abs(targetWorldY - worldPos.y) < 0.01) return false;
-  const localTarget = node.parent.worldToLocal(new THREE.Vector3(worldPos.x, targetWorldY, worldPos.z));
-  drops.push({ node, fromY: node.position.y, toY: localTarget.y, t: 0, duration: 0.45 });
-  return true;
-}
 
 function releaseHeld(holder, announce=true){
   const rec = held.get(holder);
@@ -778,11 +753,20 @@ function releaseHeld(holder, announce=true){
   rec.node.getWorldQuaternion(tmpQ);
   const d = tmpV.distanceTo(rec.homeWorldPos);
   const a = 2*Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
-  if (d < SNAP_DIST && a < SNAP_ANG) snapHome(rec);
-  else {
-    dropRelease(rec);
-    if (announce) toast('Released ' + rec.label);
-  }
+  if (d < SNAP_DIST && a < SNAP_ANG){ snapHome(rec); return; }
+  // start drop physics — small downward + forward toss
+  const vel = new THREE.Vector3(0, -0.3, 0);
+  // add a bit of the player's look direction as throw impulse
+  camera.getWorldDirection(tmpV2);
+  vel.x += tmpV2.x * 0.4;
+  vel.z += tmpV2.z * 0.4;
+  const angVel = new THREE.Vector3(
+    (Math.random()-0.5)*2.5,
+    (Math.random()-0.5)*1.5,
+    (Math.random()-0.5)*2.5
+  );
+  dropping.push({ node: rec.node, rec, vel, angVel, bounces:0, time:0 });
+  if (announce) toast('Dropped ' + rec.label);
 }
 
 function snapHome(rec){
@@ -797,6 +781,7 @@ function snapHome(rec){
 
 function resetAll(){
   for (const holder of [...held.keys()]) releaseHeld(holder, false);
+  dropping.length = 0;   // cancel any in-flight drops
   for (const rec of grabbables) snapHome(rec);
   for (const i of interactables){
     if (i.kind==='door'){ i.open=false; i.target=0; }
@@ -1438,6 +1423,76 @@ function updateHover(){
   setHint(held.get(camera) ? ((isTouch?'Snap':'E release, R snap') + ' — holding ' + held.get(camera).label) : '');
 }
 
+/* ============================== drop physics ============================== */
+const DROP_GRAVITY = 9.8;
+const DROP_BOUNCE = 0.35;      // restitution coefficient
+const DROP_FRICTION = 0.7;     // horizontal velocity kept per bounce
+const DROP_ANG_DAMP = 0.88;    // angular velocity damped per bounce
+const DROP_SETTLE_VEL = 0.08;  // velocity below which we consider it settled
+const DROP_MAX_TIME = 4;       // max seconds before force-settling
+
+function updateDropping(dt){
+  for (let i = dropping.length - 1; i >= 0; i--){
+    const d = dropping[i];
+    d.time += dt;
+
+    // gravity
+    d.vel.y -= DROP_GRAVITY * dt;
+
+    // integrate position (world-space, but node is child of worldRoot)
+    d.node.position.x += d.vel.x * dt;
+    d.node.position.y += d.vel.y * dt;
+    d.node.position.z += d.vel.z * dt;
+
+    // tumble rotation
+    d.node.rotation.x += d.angVel.x * dt;
+    d.node.rotation.y += d.angVel.y * dt;
+    d.node.rotation.z += d.angVel.z * dt;
+
+    // find ground below the part (use world position)
+    d.node.getWorldPosition(tmpV);
+    const box = new THREE.Box3().setFromObject(d.node);
+    const bottomY = box.min.y;
+
+    // floor collision — find actual ground height (excluding the falling
+    // part's own meshes, which are in `collidables` too and would otherwise
+    // self-intersect the downward ray)
+    ray.ray.origin.set(tmpV.x, tmpV.y + 2, tmpV.z);
+    ray.ray.direction.set(0, -1, 0);
+    ray.far = 10;
+    const groundTargets = collidables.filter(o => !isDescendantOf(o, d.node));
+    const hit = firstHit(ray.intersectObjects(groundTargets, false));
+    const groundY = hit ? hit.point.y : 0;
+
+    // how far below ground is the bottom of the part?
+    if (bottomY <= groundY && d.vel.y < 0){
+      // push part up so bottom sits at ground level
+      const penetration = groundY - bottomY;
+      d.node.position.y += penetration;
+
+      // bounce
+      d.vel.y = -d.vel.y * DROP_BOUNCE;
+      d.vel.x *= DROP_FRICTION;
+      d.vel.z *= DROP_FRICTION;
+      d.angVel.multiplyScalar(DROP_ANG_DAMP);
+      d.bounces++;
+
+      // check if settled
+      if (Math.abs(d.vel.y) < DROP_SETTLE_VEL || d.bounces >= 5 || d.time > DROP_MAX_TIME){
+        d.vel.set(0, 0, 0);
+        d.angVel.set(0, 0, 0);
+        dropping.splice(i, 1);
+      }
+    }
+
+    // timeout safety
+    if (d.time > DROP_MAX_TIME){
+      d.vel.set(0, 0, 0);
+      dropping.splice(i, 1);
+    }
+  }
+}
+
 /* ============================== animation loop ============================== */
 const clock = new THREE.Clock();
 let hoverTick = 0;
@@ -1463,16 +1518,11 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  for (let i = drops.length - 1; i >= 0; i--){
-    const d = drops[i];
-    d.t += dt;
-    const p = Math.min(d.t / d.duration, 1);
-    d.node.position.y = d.fromY + (d.toY - d.fromY) * easeOutBounce(p);
-    if (p >= 1) drops.splice(i, 1);
-  }
-
   hoverTick += dt;
   if (hoverTick > 0.08){ hoverTick = 0; updateHover(); }
+
+  // drop physics for released parts
+  updateDropping(dt);
 
   renderer.render(scene, camera);
 });
