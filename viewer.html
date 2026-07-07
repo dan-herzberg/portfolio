@@ -1940,19 +1940,31 @@ function updateActionButtons(av){
     const label = held.get(camera) ? 'Release' : 'Grab';
     if (g.textContent !== label) g.textContent = label;
   }
+  const ib = document.getElementById('mInteract');
+  if (ib){
+    const label = av.teleport ? 'Teleport' : 'Interact';
+    if (ib.textContent !== label) ib.textContent = label;
+  }
 }
 
 function updateHover(){
   if (renderer.xr.isPresenting){ updateLasers(); setHoverGlow(null); setHint(''); return; }
   const holding = held.get(camera);
   // holding something always allows release (Grab btn) and reset
-  const av = { interact:false, grab:!!holding, reset:!!holding, edit:false };
+  const av = { interact:false, grab:!!holding, reset:!!holding, edit:false, teleport:false };
   const r = centerRay();
   // the editor opens on any aimed part, grabbable or not
   r.far = 4.5;
   av.edit = !!firstHit(r.intersectObjects(collidables, false));
   r.far = 4;
   const hi = firstHit(r.intersectObjects(interactMeshes, false));
+  // in teleport mode, aiming at a teleportable (upward-facing) surface that
+  // isn't an interactable relabels the Interact button as Teleport - the
+  // marker's visibility is exactly that test, updated every frame
+  if (!hi && mode === 'teleport' && teleportMarker.visible){
+    av.teleport = true;
+    av.interact = true;
+  }
   if (hi){
     setHoverGlow(null);
     const it = hi.object.userData.inter;
@@ -2006,14 +2018,16 @@ function updateTeleportMarker(){
 const DROP_GRAVITY = 9.8;              // uniform - applied identically to every dropping part
 const DROP_RESTITUTION = 0.22;         // per-contact bounce coefficient
 const DROP_LINEAR_DRAG = 0.05;         // fraction of horizontal velocity kept after 1s of drag (vertical is undamped, gravity-only)
-const DROP_ANGULAR_DRAG = 0.08;        // fraction of angular velocity kept after 1s of drag
+const DROP_ANGULAR_DRAG = 0.45;        // fraction of angular velocity kept after 1s of drag - gentle enough that a tilted part can finish tipping over
 const DROP_FRICTION_TANGENT = 0.6;     // tangential contact velocity kept per resolution pass
 const DROP_SOLVER_ITERATIONS = 3;      // Gauss-Seidel passes per frame so multiple simultaneous contacts settle together
 const DROP_MIN_BOUNCES_TO_SETTLE = 2;  // must have actually bounced twice before settling is even considered
 const DROP_SETTLE_CONTACTS = 3;        // simultaneous resting contacts required to settle, for every shape
+const DROP_SETTLE_VEL = 0.1;           // m/s; must also be essentially motionless to settle
+const DROP_SETTLE_ANGVEL = 0.35;       // rad/s; still tipping = keep simulating toward the stable pose
 const DROP_CONTACT_EPS = 0.01;         // meters; "touching" tolerance for a contact point
 const DROP_IMPACT_VEL = 0.05;          // m/s; incoming normal speed above which a contact counts as a real bounce
-const DROP_MAX_TIME = 6;               // unconditional backstop for a numerically marginal case that never quite settles
+const DROP_MAX_TIME = 8;               // unconditional backstop for a numerically marginal case that never quite settles
 const DROP_BROADPHASE_MARGIN = 0.15;   // meters; skip the per-contact-point narrow phase while this far above the ground
 
 // Integrates one physics step: translates by vel*dt, then rotates about the
@@ -2148,13 +2162,21 @@ function updateDropping(dt){
     }
     if (bounced) d.bounces++;
 
-    // settle: needs at least 2 real bounces, then 3 simultaneous resting
-    // contacts - every mesh is faceted, so even a "sphere" or cylinder can
-    // eventually rest 3 sampled vertices on a surface. The unconditional
-    // time backstop covers a numerically marginal case that never quite
-    // decides. No forced re-orientation on settle, ever - freeze exactly
-    // where the physics stopped, whatever tilt that is.
-    if ((d.bounces >= DROP_MIN_BOUNCES_TO_SETTLE && contactCount >= DROP_SETTLE_CONTACTS) ||
+    // settle: needs at least 2 real bounces, 3 simultaneous resting
+    // contacts (every mesh is faceted, so even a "sphere" or cylinder can
+    // eventually rest 3 sampled vertices on a surface), AND to be
+    // essentially motionless. The motion gate is what lets a part keep
+    // tipping toward its lowest-energy pose instead of freezing the moment
+    // 3 clustered points brush a surface mid-tumble - gravity torque via
+    // the contact impulses keeps rotating a tilted part until it's flat
+    // enough to actually stop. The unconditional time backstop covers a
+    // numerically marginal case that never quite decides. No forced
+    // re-orientation on settle, ever - freeze exactly where the physics
+    // stopped, whatever tilt that is.
+    if ((d.bounces >= DROP_MIN_BOUNCES_TO_SETTLE &&
+         contactCount >= DROP_SETTLE_CONTACTS &&
+         d.vel.length() < DROP_SETTLE_VEL &&
+         d.angVel.length() < DROP_SETTLE_ANGVEL) ||
         d.time > DROP_MAX_TIME){
       dropping.splice(i, 1);
       continue;
