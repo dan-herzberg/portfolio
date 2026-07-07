@@ -39,7 +39,9 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 ## Grabbing parts
 
-Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones. Release a grabbed part away from its home position and it falls, bounces a couple of times, and comes to rest wherever the tumble physics naturally stops — no forced re-orientation to any prescribed pose, home or otherwise.
+Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones.
+
+Carrying a part tracks its actual recent motion (from the mouse, the wheel push/pull, or a VR controller), so throwing it imparts real momentum in the direction you were moving it — this glide decays quickly rather than sailing across the room, while the fall itself is driven by ordinary, uniform gravity. On impact the part rotates about its own center of mass and tumbles realistically from one contact to the next (an off-center hit spins it, a flat landing doesn't), rather than following a canned bounce-and-decay curve. It settles once it's bounced at least twice and has enough points simultaneously resting on the floor or another object to be geometrically stable — three for a box-like part, fewer if the shape can't achieve that (two for a cylinder or cone, one for a sphere) — and then freezes exactly where it stopped, with no forced re-orientation to any prescribed pose, home or otherwise.
 
 While carrying a part, a translucent ghost of it appears at its home slot as soon as you're close enough (position and angle) that releasing would snap it back — a preview of where it's about to land.
 
@@ -81,7 +83,7 @@ Overrides file format:
 {
   "roles": {
     "Assembly1/Panel_3": { "role": "door", "hinge": "right" },
-    "Gear_A": { "role": "grabbable" }
+    "Ring_A": { "role": "grabbable" }
   },
   "settings": { "walkSpeed": 3.6, "flySpeed": 6.5 }
 }
@@ -109,7 +111,8 @@ Claude receives the scene inventory (node paths, roles, states) and returns a st
 
 - Hinge inference assumes a roughly box-shaped door with a vertical hinge on the wide axis. Sliding doors, curved gates, and off-axis doors need the manual hinge flip or won't look right.
 - Node paths use names for stability. Unnamed twin nodes fall back to child indices, which shift if the hierarchy changes. Name your parts.
-- Collision uses raycasts (ground plus two wall rays), not full physics. Thin geometry can be walked through at high speed.
+- Player movement collision uses raycasts (ground plus two wall rays), not full physics. Thin geometry can be walked through at high speed.
+- Dropped/thrown parts get a small hand-rolled rigid-body approximation, not a full physics engine: contact points are sampled from each part's own geometry rather than a true convex hull, so a concave part (an L-bracket's notch, for instance) can rest very slightly above its true resting surface at the concavity. Good enough for realistic-looking tumbling, not exact CAD-accurate collision.
 - Switches toggle lights within 6 m by proximity, not by explicit wiring.
 - Quest 2 comfortable range: under ~1M triangles and ~100 MB. Decimate in CAD or gltf-transform (`npx gltf-transform optimize in.glb out.glb`) before loading.
 - Edit mode and the Claude bar are flat-screen features. Make your edits on desktop, export the overrides, and the same file drives the VR session.
