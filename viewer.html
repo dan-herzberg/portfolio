@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>GLB Walkthrough | D. Herzberg</title>
+<title>GLB Walkthrough</title>
 <style>
   :root{
     --bg:#101318; --panel:rgba(16,19,24,.88); --line:#2a3140;
@@ -23,9 +23,6 @@
   button:active{transform:translateY(1px);}
   button.on{background:var(--accent);color:#14100a;border-color:var(--accent);font-weight:600;}
   .label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:2px 0 6px;}
-  a.navlink{background:#1b2230;color:var(--text);border:1px solid var(--line);border-radius:6px;
-    padding:8px 10px;font-size:13px;font-family:inherit;text-decoration:none;display:inline-block;}
-  a.navlink:hover{border-color:var(--accent);color:var(--accent);}
 
   #hint{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:10;
     background:var(--panel);border:1px solid var(--line);border-radius:6px;
@@ -92,9 +89,6 @@
     <div class="row" style="margin-top:6px;">
       <button id="btnExport">Export edits</button>
       <button id="btnImport">Import edits</button>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <a class="navlink" href="projects.html">&larr; Side Projects</a>
     </div>
   </div>
   <div class="panel">
@@ -175,8 +169,8 @@ Edit mode + AI run on flat screens only.
 <div id="mobile">
   <div id="stick"><div id="knob"></div></div>
   <div id="vslide">
-    <button id="mUp">&#9650; Up</button>
-    <button id="mDown">&#9660; Down</button>
+    <button id="mUp">▲ Up</button>
+    <button id="mDown">▼ Down</button>
   </div>
   <div id="mbtns">
     <button id="mInteract">Interact</button>
@@ -280,6 +274,7 @@ const SWITCH_RE = /switch|button|btn|lever|toggle/i;
 const MAX_GRAB_DIM = 5;        // meters, larger top-level parts stay static
 const SNAP_DIST = 0.6, SNAP_ANG = 0.5;
 let walkSpeed = 3.6, flySpeed = 6.5;
+const dropping = [];           // {node, vel:Vector3, angVel:Vector3, bounces:0, settled:false}
 let overrides = { roles:{}, settings:{} };   // roles: path -> {role, hinge}
 let lastSource = null;                       // {kind:'glb', buffer, label} | {kind:'demo'}
 let loadedRoot = null;
@@ -347,6 +342,7 @@ function readFile(file){
 
 function clearWorld(){
   for (const h of [...held.keys()]) releaseHeld(h, false);
+  dropping.length = 0;
   if (worldRoot) scene.remove(worldRoot);
   worldRoot = null;
   collidables = [floor];
@@ -640,8 +636,20 @@ function releaseHeld(holder, announce=true){
   rec.node.getWorldQuaternion(tmpQ);
   const d = tmpV.distanceTo(rec.homeWorldPos);
   const a = 2*Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
-  if (d < SNAP_DIST && a < SNAP_ANG) snapHome(rec);
-  else if (announce) toast('Released ' + rec.label);
+  if (d < SNAP_DIST && a < SNAP_ANG){ snapHome(rec); return; }
+  // start drop physics — small downward + forward toss
+  const vel = new THREE.Vector3(0, -0.3, 0);
+  // add a bit of the player's look direction as throw impulse
+  camera.getWorldDirection(tmpV2);
+  vel.x += tmpV2.x * 0.4;
+  vel.z += tmpV2.z * 0.4;
+  const angVel = new THREE.Vector3(
+    (Math.random()-0.5)*2.5,
+    (Math.random()-0.5)*1.5,
+    (Math.random()-0.5)*2.5
+  );
+  dropping.push({ node: rec.node, rec, vel, angVel, bounces:0, time:0 });
+  if (announce) toast('Dropped ' + rec.label);
 }
 
 function snapHome(rec){
@@ -656,6 +664,7 @@ function snapHome(rec){
 
 function resetAll(){
   for (const holder of [...held.keys()]) releaseHeld(holder, false);
+  dropping.length = 0;   // cancel any in-flight drops
   for (const rec of grabbables) snapHome(rec);
   for (const i of interactables){
     if (i.kind==='door'){ i.open=false; i.target=0; }
@@ -1242,6 +1251,73 @@ function updateHover(){
   setHint(held.get(camera) ? ((isTouch?'Snap':'E release, R snap') + ' — holding ' + held.get(camera).label) : '');
 }
 
+/* ============================== drop physics ============================== */
+const DROP_GRAVITY = 9.8;
+const DROP_BOUNCE = 0.35;      // restitution coefficient
+const DROP_FRICTION = 0.7;     // horizontal velocity kept per bounce
+const DROP_ANG_DAMP = 0.88;    // angular velocity damped per bounce
+const DROP_SETTLE_VEL = 0.08;  // velocity below which we consider it settled
+const DROP_MAX_TIME = 4;       // max seconds before force-settling
+
+function updateDropping(dt){
+  for (let i = dropping.length - 1; i >= 0; i--){
+    const d = dropping[i];
+    d.time += dt;
+
+    // gravity
+    d.vel.y -= DROP_GRAVITY * dt;
+
+    // integrate position (world-space, but node is child of worldRoot)
+    d.node.position.x += d.vel.x * dt;
+    d.node.position.y += d.vel.y * dt;
+    d.node.position.z += d.vel.z * dt;
+
+    // tumble rotation
+    d.node.rotation.x += d.angVel.x * dt;
+    d.node.rotation.y += d.angVel.y * dt;
+    d.node.rotation.z += d.angVel.z * dt;
+
+    // find ground below the part (use world position)
+    d.node.getWorldPosition(tmpV);
+    const box = new THREE.Box3().setFromObject(d.node);
+    const bottomY = box.min.y;
+
+    // floor collision — find actual ground height
+    ray.ray.origin.set(tmpV.x, tmpV.y + 2, tmpV.z);
+    ray.ray.direction.set(0, -1, 0);
+    ray.far = 10;
+    const hit = firstHit(ray.intersectObjects(collidables, false));
+    const groundY = hit ? hit.point.y : 0;
+
+    // how far below ground is the bottom of the part?
+    if (bottomY <= groundY && d.vel.y < 0){
+      // push part up so bottom sits at ground level
+      const penetration = groundY - bottomY;
+      d.node.position.y += penetration;
+
+      // bounce
+      d.vel.y = -d.vel.y * DROP_BOUNCE;
+      d.vel.x *= DROP_FRICTION;
+      d.vel.z *= DROP_FRICTION;
+      d.angVel.multiplyScalar(DROP_ANG_DAMP);
+      d.bounces++;
+
+      // check if settled
+      if (Math.abs(d.vel.y) < DROP_SETTLE_VEL || d.bounces >= 5 || d.time > DROP_MAX_TIME){
+        d.vel.set(0, 0, 0);
+        d.angVel.set(0, 0, 0);
+        dropping.splice(i, 1);
+      }
+    }
+
+    // timeout safety
+    if (d.time > DROP_MAX_TIME){
+      d.vel.set(0, 0, 0);
+      dropping.splice(i, 1);
+    }
+  }
+}
+
 /* ============================== animation loop ============================== */
 const clock = new THREE.Clock();
 let hoverTick = 0;
@@ -1269,6 +1345,9 @@ renderer.setAnimationLoop(() => {
 
   hoverTick += dt;
   if (hoverTick > 0.08){ hoverTick = 0; updateHover(); }
+
+  // drop physics for released parts
+  updateDropping(dt);
 
   renderer.render(scene, camera);
 });
