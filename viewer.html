@@ -1708,7 +1708,7 @@ function applyLook(){
 const joy = { active:false, id:null, cx:0, cy:0, x:0, y:0 };
 const look = { id:null, lx:0, ly:0 };
 const stickEl = document.getElementById('stick'), knob = document.getElementById('knob');
-let mUpHeld=false, mDownHeld=false;
+let mUpHeld=false, mDownHeld=false, mJumpHeld=false;
 
 {
   stickEl.addEventListener('touchstart', e => {
@@ -1758,7 +1758,11 @@ let mUpHeld=false, mDownHeld=false;
     const rec = held.get(camera);
     if (rec){ held.delete(camera); snapHome(rec); }
   });
-  hold('mJump', ()=>{ if (mode==='walk' && st.grounded) st.velY = 4.4; });
+  // Jump works in every mode: walk/teleport = jump off the ground,
+  // fly = ascend while held (same as the Up button)
+  hold('mJump',
+    ()=>{ if (mode==='fly') mJumpHeld = true; else if (st.grounded) st.velY = 4.4; },
+    ()=>mJumpHeld = false);
   hold('mEdit', ()=>openEditor());
   hold('mUp', ()=>mUpHeld=true, ()=>mUpHeld=false);
   hold('mDown', ()=>mDownHeld=true, ()=>mDownHeld=false);
@@ -1885,7 +1889,7 @@ function updateMovement(dt){
   if (mode==='fly'){
     if (keys['Space'] || keys['ArrowUp']) iy += 1;
     if (keys['KeyC'] || keys['ShiftLeft'] || keys['ArrowDown']) iy -= 1;
-    if (mUpHeld) iy += 1;
+    if (mUpHeld || mJumpHeld) iy += 1;
     if (mDownHeld) iy -= 1;
   } else if (keys['Space'] && st.grounded){ st.velY = 4.4; st.grounded = false; }
   ix += joy.x; iz += joy.y;
@@ -2025,6 +2029,9 @@ const DROP_MIN_BOUNCES_TO_SETTLE = 2;  // must have actually bounced twice befor
 const DROP_SETTLE_CONTACTS = 3;        // simultaneous resting contacts required to settle, for every shape
 const DROP_SETTLE_VEL = 0.1;           // m/s; must also be essentially motionless to settle
 const DROP_SETTLE_ANGVEL = 0.35;       // rad/s; still tipping = keep simulating toward the stable pose
+const DROP_GROUND_SLIDE_KEEP = 0.02;   // horizontal velocity kept after 1s of ground contact (sliding friction)
+const DROP_GROUND_TWIST_KEEP = 0.02;   // vertical-axis spin kept after 1s of ground contact (twist friction)
+const DROP_GROUND_ROLL_KEEP = 0.35;    // horizontal-axis spin kept after 1s of contact - mild, so tipping still completes
 const DROP_CONTACT_EPS = 0.01;         // meters; "touching" tolerance for a contact point
 const DROP_IMPACT_VEL = 0.05;          // m/s; incoming normal speed above which a contact counts as a real bounce
 const DROP_MAX_TIME = 8;               // unconditional backstop for a numerically marginal case that never quite settles
@@ -2150,9 +2157,14 @@ function updateDropping(dt){
           d.vel.addScaledVector(normal, j);
           d.angVel.addScaledVector(iInvRxnWorld, j);
 
-          // tangential friction (simplified Coulomb approximation)
-          const vt = vPoint.clone().sub(normal.clone().multiplyScalar(vn));
-          d.vel.addScaledVector(vt, -(1 - DROP_FRICTION_TANGENT));
+          // tangential friction (simplified Coulomb approximation). Damp
+          // only the BODY's tangential velocity - using the contact
+          // point's (which includes the w x r spin term) would convert
+          // spin into translation and send a spinning part sliding
+          // across the floor
+          const vnLin = d.vel.dot(normal);
+          const vtLin = d.vel.clone().sub(normal.clone().multiplyScalar(vnLin));
+          d.vel.addScaledVector(vtLin, -(1 - DROP_FRICTION_TANGENT));
         }
       }
       if (maxPenetration > 0){
@@ -2161,6 +2173,18 @@ function updateDropping(dt){
       }
     }
     if (bounced) d.bounces++;
+
+    // ground friction while touching: sliding and twist-about-vertical die
+    // out quickly (real friction kills both), but tipping/rolling about
+    // horizontal axes is left nearly free so a tilted part can still
+    // topple to its resting pose
+    if (contactCount > 0){
+      const slideKeep = Math.pow(DROP_GROUND_SLIDE_KEEP, dt);
+      d.vel.x *= slideKeep; d.vel.z *= slideKeep;
+      d.angVel.y *= Math.pow(DROP_GROUND_TWIST_KEEP, dt);
+      const rollKeep = Math.pow(DROP_GROUND_ROLL_KEEP, dt);
+      d.angVel.x *= rollKeep; d.angVel.z *= rollKeep;
+    }
 
     // settle: needs at least 2 real bounces, 3 simultaneous resting
     // contacts (every mesh is faceted, so even a "sphere" or cylinder can
