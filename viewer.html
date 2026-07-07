@@ -37,8 +37,12 @@
   .toast.show{opacity:1;}
 
   #reticle{position:fixed;left:50%;top:50%;width:8px;height:8px;margin:-4px;z-index:9;
-    border:2px solid rgba(255,255,255,.65);border-radius:50%;pointer-events:none;display:none;}
-  #reticle.hot{border-color:var(--accent);}
+    border:2px solid rgba(255,255,255,.65);border-radius:50%;pointer-events:none;display:none;
+    background:rgba(0,0,0,.18);box-shadow:0 0 0 1px rgba(0,0,0,.3);}
+  #reticle.hot{border-color:var(--accent);background:rgba(224,164,60,.28);}
+  @media (pointer:coarse){
+    #reticle{width:18px;height:18px;margin:-9px;border-width:2.5px;}
+  }
 
   #help{position:fixed;right:10px;top:10px;z-index:10;max-width:300px;display:none;}
   #help pre{margin:0;font-size:12px;line-height:1.6;white-space:pre-wrap;color:var(--text);}
@@ -262,6 +266,8 @@ let interactMeshes = [];       // meshes -> userData.inter
 let grabMeshes = [];           // meshes -> userData.grab
 let sceneLights = [];
 const held = new Map();        // holder Object3D -> grab record
+let hoveredGrab = null;        // currently aimed-at grabbable, for hover highlight
+const HOVER_GLOW = 0x24303f;   // cool, dim: distinct from held (amber) and switch-on (green)
 const st = { yaw:0, pitch:0, velY:0, grounded:false };
 const keys = {};
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpV3 = new THREE.Vector3();
@@ -347,6 +353,7 @@ function clearWorld(){
   interactables = []; grabbables = [];
   interactMeshes = []; grabMeshes = [];
   sceneLights = [];
+  hoveredGrab = null;
 }
 
 function buildWorld(root, label, keepPlayer=false){
@@ -452,6 +459,12 @@ function setGlow(node, hex){
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats) if (m.emissive) m.emissive.setHex(hex);
   });
+}
+function setHoverGlow(rec){
+  if (hoveredGrab === rec) return;
+  if (hoveredGrab && !isHeld(hoveredGrab.node)) setGlow(hoveredGrab.node, 0x000000);
+  hoveredGrab = rec;
+  if (rec && !isHeld(rec.node)) setGlow(rec.node, HOVER_GLOW);
 }
 
 function makeDoor(node, hinge='left'){
@@ -933,7 +946,7 @@ function applyOps(ops){
 /* ============================== desktop input ============================== */
 const isTouch = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.getElementById('mobile').style.display = 'block';
-else document.getElementById('reticle').style.display = 'block';
+document.getElementById('reticle').style.display = 'block';
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -1204,11 +1217,12 @@ function updateMovement(dt){
 /* ============================== hover / hints ============================== */
 const reticle = document.getElementById('reticle');
 function updateHover(){
-  if (renderer.xr.isPresenting){ updateLasers(); setHint(''); return; }
+  if (renderer.xr.isPresenting){ updateLasers(); setHoverGlow(null); setHint(''); return; }
   const r = centerRay();
   r.far = 4;
   const hi = firstHit(r.intersectObjects(interactMeshes, false));
   if (hi){
+    setHoverGlow(null);
     const it = hi.object.userData.inter;
     reticle.classList.add('hot');
     setHint((isTouch?'Interact':'Click') + ': ' +
@@ -1219,9 +1233,11 @@ function updateHover(){
   const hg = firstHit(r.intersectObjects(grabMeshes, false));
   if (hg){
     reticle.classList.add('hot');
+    setHoverGlow(hg.object.userData.grab);
     setHint((isTouch?'Grab':'E') + ': grab ' + hg.object.userData.grab.label);
     return;
   }
+  setHoverGlow(null);
   reticle.classList.remove('hot');
   setHint(held.get(camera) ? ((isTouch?'Snap':'E release, R snap') + ' — holding ' + held.get(camera).label) : '');
 }
