@@ -31,7 +31,7 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 **Quest 2:** left stick moves, right stick snap-turns. Trigger = interact or teleport. Grip = grab/release. A cycles mode, X resets the whole scene (parts, doors, switches, and your position).
 
-**Desktop/Touch toggle:** the app guesses whether you're on a touch device from the browser's pointer capabilities, which can misfire on touchscreen laptops. Use the Desktop/Touch buttons in the Movement panel to force the correct mode if the on-screen joystick appears when you have a mouse, or vice versa.
+**Touch detection:** the app decides whether to show the on-screen joystick using the primary pointing device's precision (`pointer: coarse`) plus a mobile user-agent/client-hints check, not just "is a touchscreen present" - so a touchscreen laptop with a mouse attached still reads as desktop.
 
 **Collapsing the panels:** the small circular button above the Scene panel minimizes the whole left-side panel stack down to just that button, leaving the full view unobstructed — click it again to bring the panels back. It starts collapsed by default on touch devices, since the panel stack eats a lot of a phone screen.
 

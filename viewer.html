@@ -129,10 +129,6 @@
         <span class="mono" style="font-size:11px;color:var(--dim);">Fly speed</span>
         <input type="range" id="flySpeedSlider" min="1" max="30" step="0.5" value="6.5" style="flex:1;min-width:80px;">
       </div>
-      <div class="row" style="margin-top:6px;">
-        <button id="inputDesktop">Desktop</button>
-        <button id="inputTouch">Touch</button>
-      </div>
     </div>
     <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded</div>
     <div class="panel">
@@ -1233,22 +1229,17 @@ function applyOps(ops){
 }
 
 /* ============================== desktop input ============================== */
-// Coarse-pointer/touch-capable is common on hybrid laptops that also have a
-// mouse. Only default to touch mode when there's no fine-pointer/hover
-// capability alongside it; a manual override below covers whatever this
-// heuristic gets wrong.
-const hasFinePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
-const hasTouchPoints = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
-let isTouch = hasTouchPoints && !hasFinePointer;
-function applyInputMode(){
-  document.getElementById('mobile').style.display = isTouch ? 'block' : 'none';
-  document.getElementById('vslide').style.display = (isTouch && mode==='fly') ? 'flex' : 'none';
-  document.getElementById('inputDesktop').classList.toggle('on', !isTouch);
-  document.getElementById('inputTouch').classList.toggle('on', isTouch);
-}
-document.getElementById('inputDesktop').onclick = () => { isTouch = false; applyInputMode(); toast('Input: Desktop'); };
-document.getElementById('inputTouch').onclick = () => { isTouch = true; applyInputMode(); toast('Input: Touch'); };
-applyInputMode();
+// A touchscreen laptop with a mouse attached still reports maxTouchPoints > 0,
+// so touch capability alone isn't enough - check whether touch is the
+// *primary* input (pointer: coarse tests the primary pointing device, not
+// just "any" available one) and corroborate with a UA/client-hints mobile
+// check, so a mouse-primary touchscreen laptop still reads as desktop.
+const uaMobile = navigator.userAgentData
+  ? navigator.userAgentData.mobile
+  : /Mobi|Android|iPhone|iPad|iPod|Silk|Windows Phone/i.test(navigator.userAgent);
+const primaryPointerCoarse = matchMedia('(pointer: coarse)').matches;
+const isTouch = uaMobile || (primaryPointerCoarse && (navigator.maxTouchPoints || 0) > 0);
+if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
 
 /* ============================== collapsible HUD ============================== */
@@ -1259,8 +1250,7 @@ function setHudCollapsed(collapsed){
   hudToggle.innerHTML = collapsed ? '&#9654;' : '&#9664;';
 }
 hudToggle.onclick = () => setHudCollapsed(!hud.classList.contains('collapsed'));
-// mobile screens are cramped, so start collapsed there; this only sets the
-// initial default and doesn't fight the manual Desktop/Touch override above
+// mobile screens are cramped, so start collapsed there
 setHudCollapsed(isTouch);
 
 addEventListener('keydown', e => {
