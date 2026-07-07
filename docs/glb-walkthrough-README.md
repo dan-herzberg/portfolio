@@ -30,6 +30,22 @@ Roles come from **node names** at load time:
 
 **Quest 2:** left stick moves, right stick snap-turns. Trigger = interact or teleport. Grip = grab/release. A cycles mode, X resets all parts.
 
+**Desktop/Touch toggle:** the app guesses whether you're on a touch device from the browser's pointer capabilities, which can misfire on touchscreen laptops. Use the Desktop/Touch buttons in the Movement panel to force the correct mode if the on-screen joystick appears when you have a mouse, or vice versa.
+
+## Grabbing parts
+
+Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part, not just top-level ones. Release a grabbed part away from its home position and it falls and settles (with a small bounce) onto whatever is below it, rather than staying wherever you let go.
+
+## Locked doors
+
+In the part editor, a door also gets a **Lock** toggle. A locked door won't open on interact (the reticle turns red when you aim at one), and the Claude command bar has a matching `setLocked` op ("lock the front door").
+
+## Force opaque / Simplify
+
+Two more Scene-panel tools:
+- **Force opaque** — strips transparency from every material in the loaded scene. If a part looks see-through and turning this on makes it solid, the transparency is coming from the source model's export (an alpha value or `BLEND` alphaMode in the GLB), not the viewer.
+- **Simplify** — a notched slider (3% per notch) that hides the smallest N% of parts by triangle count. CAD exports often carry a disproportionate share of their triangle budget in tiny fasteners and rounded-edge detail; hiding the smallest parts first is usually the cheapest way to cut a scene down. It's non-destructive — hidden parts come back the moment you move the slider down (or reload the model).
+
 ## Grab and snap-back
 
 Grab any registered part, carry it, release it. Release within 0.6 m and ~30° of its original pose and it snaps home automatically. **R** (or the Snap button) forces a snap. **Reset parts** restores every part, closes every door, and turns every switch off.

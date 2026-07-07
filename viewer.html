@@ -23,9 +23,21 @@
   button:active{transform:translateY(1px);}
   button.on{background:var(--accent);color:#14100a;border-color:var(--accent);font-weight:600;}
   .label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:2px 0 6px;}
-  a.navlink{background:#1b2230;color:var(--text);border:1px solid var(--line);border-radius:6px;
-    padding:8px 10px;font-size:13px;font-family:inherit;text-decoration:none;display:inline-block;}
-  a.navlink:hover{border-color:var(--accent);color:var(--accent);}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;background:var(--line);
+    border-radius:2px;outline:none;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--accent);cursor:pointer;}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;
+    background:var(--accent);cursor:pointer;}
+  .row.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+  .row.grid3 button, .row.grid3 .dropdown{width:100%;}
+  .row.grid3 button{padding:8px 4px;font-size:12px;}
+  .dropdown{position:relative;}
+  .dropdown-menu{position:absolute;top:100%;left:0;margin-top:4px;display:none;flex-direction:column;
+    gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;
+    z-index:15;min-width:160px;backdrop-filter:blur(6px);}
+  .dropdown-menu.open{display:flex;}
+  .dropdown-menu button{width:100%;text-align:left;white-space:nowrap;}
 
   #hint{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:10;
     background:var(--panel);border:1px solid var(--line);border-radius:6px;
@@ -40,11 +52,13 @@
     border:2px solid rgba(255,255,255,.65);border-radius:50%;pointer-events:none;display:none;
     background:rgba(0,0,0,.18);box-shadow:0 0 0 1px rgba(0,0,0,.3);}
   #reticle.hot{border-color:var(--accent);background:rgba(224,164,60,.28);}
+  #reticle.locked{border-color:#e05252;background:rgba(224,82,82,.28);}
   @media (pointer:coarse){
     #reticle{width:18px;height:18px;margin:-9px;border-width:2.5px;}
   }
 
-  #help{position:fixed;right:10px;top:10px;z-index:10;max-width:300px;display:none;}
+  #help{position:fixed;right:10px;top:10px;bottom:340px;z-index:10;max-width:300px;
+    overflow-y:auto;display:none;}
   #help pre{margin:0;font-size:12px;line-height:1.6;white-space:pre-wrap;color:var(--text);}
   #helpBtn{position:fixed;right:10px;bottom:10px;z-index:11;width:40px;height:40px;border-radius:50%;font-size:16px;}
 
@@ -84,17 +98,21 @@
 <div id="hud">
   <div class="panel">
     <div class="label">Scene</div>
-    <div class="row">
-      <button id="btnLoad">Load .glb</button>
-      <button id="btnDemo">Demo room</button>
-      <button id="btnReset">Reset parts</button>
+    <div class="row grid3">
+      <div class="dropdown">
+        <button id="btnLoad">Load &#9662;</button>
+        <div class="dropdown-menu" id="loadMenu">
+          <button id="btnLoadFile">Load .glb file</button>
+          <button id="btnDemo">Load Demo Room</button>
+        </div>
+      </div>
+      <button id="btnReset">Reset scene</button>
+      <button id="btnExit">Exit</button>
     </div>
-    <div class="row" style="margin-top:6px;">
+    <div class="row grid3" style="margin-top:6px;">
       <button id="btnExport">Export edits</button>
       <button id="btnImport">Import edits</button>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <a class="navlink" href="projects.html">&larr; Side Projects</a>
+      <button id="btnOpaque">Force opaque</button>
     </div>
   </div>
   <div class="panel">
@@ -104,8 +122,26 @@
       <button id="mFly">Fly</button>
       <button id="mTele">Teleport</button>
     </div>
+    <div class="row" style="margin-top:6px;align-items:center;">
+      <span class="mono" style="font-size:11px;color:var(--dim);">Fly speed</span>
+      <input type="range" id="flySpeedSlider" min="1" max="30" step="0.5" value="6.5" style="flex:1;min-width:80px;">
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <button id="inputDesktop">Desktop</button>
+      <button id="inputTouch">Touch</button>
+    </div>
   </div>
   <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded</div>
+  <div class="panel">
+    <div class="label">Simplify (reduce tris)</div>
+    <div class="row" style="align-items:center;">
+      <input type="range" id="simplifySlider" min="0" max="10" step="1" value="0" style="flex:1;min-width:80px;">
+      <span class="mono" id="simplifyPct" style="font-size:11px;color:var(--dim);min-width:34px;text-align:right;">0%</span>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <button id="btnSimplify">Apply</button>
+    </div>
+  </div>
 </div>
 
 <div id="help" class="panel">
@@ -118,7 +154,7 @@ Click            interact / teleport
 E                grab / release part
 Wheel            push-pull held part
 R                snap part to home
-T                edit aimed part (role, hinge)
+T                edit aimed part (role, hinge, lock)
 1 2 3            walk fly teleport
 
 MOBILE
@@ -148,6 +184,7 @@ Edit mode + AI run on flat screens only.
   <div class="row" id="editRoles"></div>
   <div class="row" style="margin-top:8px;">
     <button id="editHinge">Flip hinge</button>
+    <button id="editLock">Lock</button>
     <button id="editClose">Close</button>
   </div>
 </div>
@@ -266,6 +303,7 @@ let interactMeshes = [];       // meshes -> userData.inter
 let grabMeshes = [];           // meshes -> userData.grab
 let sceneLights = [];
 const held = new Map();        // holder Object3D -> grab record
+const drops = [];               // {node, fromY, toY, t, duration} in-flight drop-bounce animations
 let hoveredGrab = null;        // currently aimed-at grabbable, for hover highlight
 const HOVER_GLOW = 0x24303f;   // cool, dim: distinct from held (amber) and switch-on (green)
 const st = { yaw:0, pitch:0, velY:0, grounded:false };
@@ -277,15 +315,17 @@ const ray = new THREE.Raycaster();
 
 const DOOR_RE = /door|gate|hatch|portal/i;
 const SWITCH_RE = /switch|button|btn|lever|toggle/i;
-const MAX_GRAB_DIM = 5;        // meters, larger top-level parts stay static
 const SNAP_DIST = 0.6, SNAP_ANG = 0.5;
 let walkSpeed = 3.6, flySpeed = 6.5;
 let overrides = { roles:{}, settings:{} };   // roles: path -> {role, hinge}
 let lastSource = null;                       // {kind:'glb', buffer, label} | {kind:'demo'}
 let loadedRoot = null;
 let pathIndex = new Map();                   // path -> node (built before door reparenting)
+let currentLabel = '';
 let editPath = null, editTarget = null;
 let apiKey = '';
+let forceOpaque = false;
+const materialOriginal = new Map();   // material -> {transparent, opacity} before forcing opaque
 
 /* ============================== ui helpers ============================== */
 const hintEl = document.getElementById('hint');
@@ -317,10 +357,73 @@ document.getElementById('helpBtn').onclick = ()=>{
   h.style.display = h.style.display==='block' ? 'none' : 'block';
 };
 document.getElementById('btnReset').onclick = resetAll;
+document.getElementById('btnExit').onclick = () => { location.href = 'projects.html'; };
+
+function setForceOpaque(on){
+  forceOpaque = on;
+  document.getElementById('btnOpaque').classList.toggle('on', on);
+  if (!worldRoot) return;
+  worldRoot.traverse(o => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats){
+      if (on){
+        if (!materialOriginal.has(m)) materialOriginal.set(m, { transparent: m.transparent, opacity: m.opacity });
+        m.transparent = false;
+        m.opacity = 1;
+      } else {
+        const orig = materialOriginal.get(m);
+        if (orig){ m.transparent = orig.transparent; m.opacity = orig.opacity; }
+      }
+      m.needsUpdate = true;
+    }
+  });
+}
+document.getElementById('btnOpaque').onclick = () => {
+  setForceOpaque(!forceOpaque);
+  toast('Force opaque: ' + (forceOpaque ? 'on' : 'off'));
+};
+
+/* ============================== simplify: hide smallest parts ============================== */
+// "Simplify" culls the smallest N% of parts by triangle count (tiny fasteners,
+// rounded-edge detail, etc.) rather than decimating every mesh's geometry -
+// CAD exports often carry disproportionate triangle counts on the smallest,
+// least visually important parts. Hiding (not deleting) keeps it reversible
+// by moving the slider back down.
+function partTriCount(mesh){
+  const geo = mesh.geometry;
+  if (!geo) return 0;
+  if (geo.index) return geo.index.count / 3;
+  return (geo.attributes.position?.count || 0) / 3;
+}
+document.getElementById('simplifySlider').oninput = e => {
+  document.getElementById('simplifyPct').textContent = (e.target.value * 3) + '%';
+};
+document.getElementById('btnSimplify').onclick = () => {
+  if (!worldRoot){ toast('Load a scene first'); return; }
+  const notch = parseInt(document.getElementById('simplifySlider').value, 10);
+  const pct = notch * 0.03;
+  const meshes = [];
+  worldRoot.traverse(o => { if (o.isMesh && o.name !== '__floor') meshes.push(o); });
+  if (!meshes.length){ toast('No parts to simplify'); return; }
+  for (const m of meshes) m.visible = true;
+  const removeN = Math.round(meshes.length * pct);
+  if (removeN > 0){
+    const smallest = [...meshes].sort((a, b) => partTriCount(a) - partTriCount(b)).slice(0, removeN);
+    for (const m of smallest) m.visible = false;
+  }
+  updateStats();
+  toast(removeN > 0
+    ? `Hid ${removeN} of ${meshes.length} smallest parts (~${notch*3}%)`
+    : 'Showing all parts');
+};
 
 /* ============================== loading ============================== */
 const loader = new GLTFLoader();
-document.getElementById('btnLoad').onclick = ()=>document.getElementById('file').click();
+const loadMenu = document.getElementById('loadMenu');
+document.getElementById('btnLoad').onclick = e => { e.stopPropagation(); loadMenu.classList.toggle('open'); };
+addEventListener('click', () => loadMenu.classList.remove('open'));
+document.getElementById('btnLoadFile').onclick = () => document.getElementById('file').click();
 document.getElementById('file').onchange = e => { if (e.target.files[0]) readFile(e.target.files[0]); };
 addEventListener('dragover', e=>{ e.preventDefault(); document.getElementById('drop').style.display='flex'; });
 addEventListener('dragleave', e=>{ if (!e.relatedTarget) document.getElementById('drop').style.display='none'; });
@@ -354,6 +457,22 @@ function clearWorld(){
   interactMeshes = []; grabMeshes = [];
   sceneLights = [];
   hoveredGrab = null;
+  drops.length = 0;
+}
+
+function countTris(){
+  let tris = 0;
+  worldRoot.traverse(o => {
+    if (!o.isMesh || !o.visible || !o.geometry) return;
+    tris += o.geometry.index ? o.geometry.index.count/3 : (o.geometry.attributes.position?.count||0)/3;
+  });
+  return Math.round(tris);
+}
+function updateStats(){
+  statsEl.textContent = `${currentLabel} | ${countTris().toLocaleString()} tris | `
+    + `${interactables.filter(i=>i.kind==='door').length} doors | `
+    + `${interactables.filter(i=>i.kind==='switch').length} switches | `
+    + `${grabbables.length} grabbable parts`;
 }
 
 function buildWorld(root, label, keepPlayer=false){
@@ -387,13 +506,11 @@ function buildWorld(root, label, keepPlayer=false){
     applyLook();
   }
 
-  let tris = 0;
-  worldRoot.traverse(o => { if (o.isMesh && o.geometry?.index) tris += o.geometry.index.count/3;
-    else if (o.isMesh && o.geometry) tris += (o.geometry.attributes.position?.count||0)/3; });
-  statsEl.textContent = `${label} | ${Math.round(tris).toLocaleString()} tris | `
-    + `${interactables.filter(i=>i.kind==='door').length} doors | `
-    + `${interactables.filter(i=>i.kind==='switch').length} switches | `
-    + `${grabbables.length} grabbable parts`;
+  currentLabel = label;
+  document.getElementById('simplifySlider').value = 0;
+  document.getElementById('simplifyPct').textContent = '0%';
+  updateStats();
+  if (forceOpaque) setForceOpaque(true);
   toast('Loaded ' + label);
   if (document.getElementById('editPanel').style.display==='block' && editPath){
     editTarget = pathIndex.get(editPath) || null;
@@ -415,7 +532,7 @@ function classify(root){
     const n = stack.pop();
     const ov = overrides.roles[nodePath(n, root)];
     if (ov){
-      if (ov.role==='door') doors.push([n, ov.hinge||'left']);
+      if (ov.role==='door') doors.push([n, ov.hinge||'left', !!ov.locked]);
       else if (ov.role==='switch') switches.push([n, false]);
       else if (ov.role==='button') switches.push([n, true]);
       else if (ov.role==='grabbable') forcedGrabs.push(n);
@@ -423,25 +540,14 @@ function classify(root){
       continue;
     }
     if (SWITCH_RE.test(n.name)) { switches.push([n, /button|btn/i.test(n.name)]); continue; }
-    if (DOOR_RE.test(n.name))   { doors.push([n, 'left']); continue; }
+    if (DOOR_RE.test(n.name))   { doors.push([n, 'left', false]); continue; }
     stack.push(...n.children);
   }
   for (const [n, isBtn] of switches) makeSwitch(n, isBtn);
-  for (const [n, hinge] of doors) makeDoor(n, hinge);
+  for (const [n, hinge, locked] of doors) makeDoor(n, hinge, locked);
+  // nothing is grabbable by default; mark parts grabbable individually via
+  // the Edit-mode role panel (T key / Edit button), same as door/switch roles
   for (const n of forcedGrabs) registerGrabbable(n);
-
-  // grabbables = remaining top-level children of the loaded root
-  for (const n of root.children){
-    if (n.userData.noGrab || n.userData.grabReg || n.isLight || n.isCamera) continue;
-    const b = new THREE.Box3().setFromObject(n);
-    if (b.isEmpty()) continue;
-    const s = b.getSize(tmpV);
-    if (Math.max(s.x, s.y, s.z) > MAX_GRAB_DIM) continue;   // static architecture
-    let hasMesh = false;
-    n.traverse(o => { if (o.isMesh) hasMesh = true; });
-    if (!hasMesh) continue;
-    registerGrabbable(n);
-  }
 }
 
 function cloneMaterials(node){
@@ -467,7 +573,7 @@ function setHoverGlow(rec){
   if (rec && !isHeld(rec.node)) setGlow(rec.node, HOVER_GLOW);
 }
 
-function makeDoor(node, hinge='left'){
+function makeDoor(node, hinge='left', locked=false){
   node.userData.noGrab = true;
   const path = nodePath(node, loadedRoot);
   cloneMaterials(node);
@@ -493,7 +599,7 @@ function makeDoor(node, hinge='left'){
 
   const center = box.getCenter(new THREE.Vector3());
   const inter = {
-    kind:'door', label: node.name || 'door', path, hinge,
+    kind:'door', label: node.name || 'door', path, hinge, locked,
     node, pivot,
     hingeWorld: hingeV.clone(),
     centerWorld: center,
@@ -564,6 +670,7 @@ function isHeld(obj){
 
 function activate(inter, fromPos){
   if (inter.kind === 'door'){
+    if (inter.locked){ toast('Locked: ' + inter.label); return; }
     inter.open = !inter.open;
     if (inter.open){
       // swing away from the activator
@@ -629,6 +736,37 @@ function grabWith(holder, raycaster){
   toast('Grabbed ' + rec.label);
 }
 
+function isDescendantOf(obj, ancestor){
+  let p = obj;
+  while (p){ if (p === ancestor) return true; p = p.parent; }
+  return false;
+}
+function easeOutBounce(t){
+  const n1 = 7.5625, d1 = 2.75;
+  if (t < 1/d1) return n1*t*t;
+  if (t < 2/d1) { t -= 1.5/d1; return n1*t*t + 0.75; }
+  if (t < 2.5/d1) { t -= 2.25/d1; return n1*t*t + 0.9375; }
+  t -= 2.625/d1; return n1*t*t + 0.984375;
+}
+function dropRelease(rec){
+  const node = rec.node;
+  const worldPos = node.getWorldPosition(tmpV3).clone();
+  const box = new THREE.Box3().setFromObject(node);
+  if (box.isEmpty()) return false;
+  const bottomOffset = worldPos.y - box.min.y;
+  ray.ray.origin.set(worldPos.x, box.min.y + 0.3, worldPos.z);
+  ray.ray.direction.set(0, -1, 0);
+  ray.far = 20;
+  const targets = collidables.filter(o => !isDescendantOf(o, node));
+  const hit = firstHit(ray.intersectObjects(targets, false));
+  if (!hit) return false;
+  const targetWorldY = hit.point.y + bottomOffset;
+  if (Math.abs(targetWorldY - worldPos.y) < 0.01) return false;
+  const localTarget = node.parent.worldToLocal(new THREE.Vector3(worldPos.x, targetWorldY, worldPos.z));
+  drops.push({ node, fromY: node.position.y, toY: localTarget.y, t: 0, duration: 0.45 });
+  return true;
+}
+
 function releaseHeld(holder, announce=true){
   const rec = held.get(holder);
   if (!rec) return;
@@ -641,7 +779,10 @@ function releaseHeld(holder, announce=true){
   const d = tmpV.distanceTo(rec.homeWorldPos);
   const a = 2*Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
   if (d < SNAP_DIST && a < SNAP_ANG) snapHome(rec);
-  else if (announce) toast('Released ' + rec.label);
+  else {
+    dropRelease(rec);
+    if (announce) toast('Released ' + rec.label);
+  }
 }
 
 function snapHome(rec){
@@ -663,7 +804,7 @@ function resetAll(){
       for (const L of sceneLights){ L.getWorldPosition(tmpV);
         if (tmpV.distanceTo(i.worldPos) < 6) L.visible = false; } }
   }
-  toast('All parts reset');
+  toast('Scene reset');
 }
 
 /* ============================== node paths & rebuild ============================== */
@@ -696,6 +837,9 @@ function currentRole(node){
   for (const g of grabbables) if (g.node === node) return 'grabbable';
   return 'static';
 }
+function findInterFor(node){
+  return interactables.find(i => i.node === node) || null;
+}
 function rebuildWorld(){
   if (!lastSource) return;
   if (lastSource.kind === 'demo') buildDemo(true);
@@ -707,7 +851,12 @@ function applyOverrideSettings(){
   const s = overrides.settings || {};
   if (s.walkSpeed > 0) walkSpeed = Math.min(s.walkSpeed, 15);
   if (s.flySpeed > 0)  flySpeed  = Math.min(s.flySpeed, 30);
+  document.getElementById('flySpeedSlider').value = flySpeed;
 }
+document.getElementById('flySpeedSlider').oninput = e => {
+  flySpeed = parseFloat(e.target.value);
+  overrides.settings = { ...overrides.settings, walkSpeed, flySpeed };
+};
 
 /* ============================== in-situ editor ============================== */
 const ROLES = ['door','switch','button','grabbable','static'];
@@ -747,6 +896,12 @@ function renderEditor(){
     row.appendChild(b);
   }
   document.getElementById('editHinge').style.display = role==='door' ? '' : 'none';
+  const lockBtn = document.getElementById('editLock');
+  lockBtn.style.display = role==='door' ? '' : 'none';
+  if (role==='door'){
+    const existing = findInterFor(editTarget);
+    lockBtn.classList.toggle('on', !!(existing && existing.locked));
+  }
 }
 function setRoleOverride(path, role, hinge){
   const prev = overrides.roles[path] || {};
@@ -759,6 +914,15 @@ document.getElementById('editHinge').onclick = () => {
   prev.hinge = prev.hinge === 'right' ? 'left' : 'right';
   overrides.roles[editPath] = prev;
   toast('Hinge: ' + prev.hinge);
+  rebuildWorld();
+};
+document.getElementById('editLock').onclick = () => {
+  const existing = findInterFor(editTarget);
+  const prev = overrides.roles[editPath] || { role:'door', hinge: (existing && existing.hinge) || 'left' };
+  prev.role = 'door';
+  prev.locked = !(existing ? existing.locked : prev.locked);
+  overrides.roles[editPath] = prev;
+  toast(prev.locked ? 'Locked' : 'Unlocked');
   rebuildWorld();
 };
 document.getElementById('editClose').onclick = () => editPanel.style.display = 'none';
@@ -820,7 +984,8 @@ function sceneInventory(){
     path: i.path,
     role: i.kind==='door' ? 'door' : (i.isButton ? 'button' : 'switch'),
     state: i.kind==='door' ? (i.open?'open':'closed') : (i.on?'on':'off'),
-    hinge: i.hinge
+    hinge: i.hinge,
+    locked: i.kind==='door' ? !!i.locked : undefined
   });
   for (const g of grabbables) inv.push({ path: g.path, role:'grabbable' });
   let count = inv.length;
@@ -852,6 +1017,7 @@ async function runCommand(){
     'Allowed ops: ' +
     '{"op":"setRole","path":P,"role":"door|switch|button|grabbable|static","hinge":"left|right"} converts a node (hinge only for doors). ' +
     '{"op":"flipHinge","path":P} flips a door hinge side. ' +
+    '{"op":"setLocked","path":P,"locked":true|false} locks or unlocks a door; a locked door will not open. ' +
     '{"op":"setDoorState","path":P,"open":true|false}. ' +
     '{"op":"setSwitch","path":P,"on":true|false}. ' +
     '{"op":"snapPart","path":P} returns a part to its home position. ' +
@@ -912,6 +1078,17 @@ function applyOps(ops){
         needRebuild = true; applied++;
         break;
       }
+      case 'setLocked': {
+        const d = interactables.find(i => i.kind==='door' && i.path===op.path);
+        if (d){
+          const prev = overrides.roles[op.path] || { role:'door', hinge: d.hinge };
+          prev.role = 'door';
+          prev.locked = !!op.locked;
+          overrides.roles[op.path] = prev;
+          needRebuild = true; applied++;
+        }
+        break;
+      }
       case 'setDoorState': {
         const d = interactables.find(i => i.kind==='door' && i.path===op.path);
         if (d && d.open !== !!op.open){ activate(d, camPos); applied++; }
@@ -944,8 +1121,22 @@ function applyOps(ops){
 }
 
 /* ============================== desktop input ============================== */
-const isTouch = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
-if (isTouch) document.getElementById('mobile').style.display = 'block';
+// Coarse-pointer/touch-capable is common on hybrid laptops that also have a
+// mouse. Only default to touch mode when there's no fine-pointer/hover
+// capability alongside it; a manual override below covers whatever this
+// heuristic gets wrong.
+const hasFinePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
+const hasTouchPoints = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
+let isTouch = hasTouchPoints && !hasFinePointer;
+function applyInputMode(){
+  document.getElementById('mobile').style.display = isTouch ? 'block' : 'none';
+  document.getElementById('vslide').style.display = (isTouch && mode==='fly') ? 'flex' : 'none';
+  document.getElementById('inputDesktop').classList.toggle('on', !isTouch);
+  document.getElementById('inputTouch').classList.toggle('on', isTouch);
+}
+document.getElementById('inputDesktop').onclick = () => { isTouch = false; applyInputMode(); toast('Input: Desktop'); };
+document.getElementById('inputTouch').onclick = () => { isTouch = true; applyInputMode(); toast('Input: Touch'); };
+applyInputMode();
 document.getElementById('reticle').style.display = 'block';
 
 addEventListener('keydown', e => {
@@ -1002,7 +1193,7 @@ const look = { id:null, lx:0, ly:0 };
 const stickEl = document.getElementById('stick'), knob = document.getElementById('knob');
 let mUpHeld=false, mDownHeld=false;
 
-if (isTouch){
+{
   stickEl.addEventListener('touchstart', e => {
     const t = e.changedTouches[0];
     joy.active = true; joy.id = t.identifier;
@@ -1224,21 +1415,26 @@ function updateHover(){
   if (hi){
     setHoverGlow(null);
     const it = hi.object.userData.inter;
-    reticle.classList.add('hot');
-    setHint((isTouch?'Interact':'Click') + ': ' +
-      (it.kind==='door' ? (it.open?'close ':'open ') : 'toggle ') + it.label);
+    if (it.kind==='door' && it.locked){
+      reticle.classList.remove('hot'); reticle.classList.add('locked');
+      setHint('Locked: ' + it.label);
+    } else {
+      reticle.classList.remove('locked'); reticle.classList.add('hot');
+      setHint((isTouch?'Interact':'Click') + ': ' +
+        (it.kind==='door' ? (it.open?'close ':'open ') : 'toggle ') + it.label);
+    }
     return;
   }
   r.far = 4.5;
   const hg = firstHit(r.intersectObjects(grabMeshes, false));
   if (hg){
-    reticle.classList.add('hot');
+    reticle.classList.remove('locked'); reticle.classList.add('hot');
     setHoverGlow(hg.object.userData.grab);
     setHint((isTouch?'Grab':'E') + ': grab ' + hg.object.userData.grab.label);
     return;
   }
   setHoverGlow(null);
-  reticle.classList.remove('hot');
+  reticle.classList.remove('hot'); reticle.classList.remove('locked');
   setHint(held.get(camera) ? ((isTouch?'Snap':'E release, R snap') + ' — holding ' + held.get(camera).label) : '');
 }
 
@@ -1265,6 +1461,14 @@ renderer.setAnimationLoop(() => {
         i.node.rotation.x = i.baseRot.x + (i.on ? 0.45 : -0.45) * (1 - i.animT);
       }
     }
+  }
+
+  for (let i = drops.length - 1; i >= 0; i--){
+    const d = drops[i];
+    d.t += dt;
+    const p = Math.min(d.t / d.duration, 1);
+    d.node.position.y = d.fromY + (d.toY - d.fromY) * easeOutBounce(p);
+    if (p >= 1) drops.splice(i, 1);
   }
 
   hoverTick += dt;
@@ -1329,6 +1533,13 @@ function buildDemo(keepPlayer=false){
   lamp.position.set(-2.2,2.2,0.8);
   root.add(lamp);
 
+  // pedestal near room center for dropped/small parts to rest on
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.32,0.85,24), M(0x3a4250,0.8,0.1));
+  pedestal.name = 'Pedestal_Rest';
+  pedestal.userData.noGrab = true;
+  pedestal.position.set(0,0.425,0);
+  root.add(pedestal);
+
   // workbench with grabbable parts
   mk(1.8,0.08,0.9, 1.8,0.85,-1.6, M(0x4a3c2c,0.85,0), root);
   mk(0.08,0.85,0.08, 1.0,0.42,-1.3, M(0x33291d), root);
@@ -1350,7 +1561,13 @@ function buildDemo(keepPlayer=false){
 
   lastSource = { kind:'demo' };
   buildWorld(root, 'demo room', keepPlayer);
-  if (!keepPlayer) toast('Demo: door, gate, button, lever, 3 parts on the bench');
+  // the demo showcases grabbing, so mark its bench parts grabbable directly
+  // rather than relying on a manual per-part toggle
+  registerGrabbable(gear);
+  registerGrabbable(bracket);
+  registerGrabbable(housing);
+  updateStats();
+  if (!keepPlayer) toast('Demo: door, gate, button, lever, pedestal, 3 parts on the bench');
 }
 
 toast('Load a .glb, or open the demo room');
