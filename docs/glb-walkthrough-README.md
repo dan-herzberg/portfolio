@@ -39,7 +39,11 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 ## Grabbing parts
 
-Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones. Release a grabbed part away from its home position and it falls, bounces a couple of times, and settles flat onto whatever is below it, rather than staying wherever you let go or freezing mid-tumble.
+Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones. Release a grabbed part away from its home position and it falls, bounces a couple of times, and settles into its own natural resting tilt (not just world-flat — a part authored lying on its side settles on its side, not tipped upright) onto whatever is below it, rather than staying wherever you let go or freezing mid-tumble.
+
+While carrying a part, a translucent ghost of it appears at its home slot as soon as you're close enough (position and angle) that releasing would snap it back — a preview of where it's about to land.
+
+Small real `.glb` loads (longest dimension under 24 in) get a pedestal placed next to them automatically, for a part with nothing else nearby to rest on. Large models skip it. The demo room has its own pedestal regardless of this, since it's built around showcasing small parts.
 
 ## Locked doors
 
