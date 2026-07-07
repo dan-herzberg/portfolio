@@ -21,6 +21,8 @@
   button{background:#1b2230;color:var(--text);border:1px solid var(--line);border-radius:6px;
     padding:8px 10px;font-size:13px;cursor:pointer;font-family:inherit;}
   button:active{transform:translateY(1px);}
+  button:disabled{opacity:.4;cursor:default;}
+  button:disabled:active{transform:none;}
   button.on{background:var(--accent);color:#14100a;border-color:var(--accent);font-weight:600;}
   .label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:2px 0 6px;}
   input[type=range]{-webkit-appearance:none;appearance:none;height:4px;background:var(--line);
@@ -151,11 +153,12 @@ DESKTOP
 Click canvas     lock mouse look
 WASD             move
 Space / C        jump | up-down (fly)
+Up / Down        up-down (fly only)
 Click            interact / teleport
 E                grab / release part
 Wheel            push-pull held part
 R                reset part to home
-T                edit aimed part (role, hinge, lock)
+T                edit aimed part (role, hinge, lock, level)
 1 2 3            walk fly teleport
 
 MOBILE
@@ -182,6 +185,10 @@ Edit mode + AI run on flat screens only.
 <div id="editPanel" class="panel">
   <div class="label">Edit part</div>
   <div id="editName" class="mono" style="font-size:12px;margin-bottom:8px;color:var(--accent);"></div>
+  <div class="row" style="margin-bottom:8px;">
+    <button id="editParent">&#9650; Parent</button>
+    <button id="editChild">&#9660; Child</button>
+  </div>
   <div class="row" id="editRoles"></div>
   <div class="row" style="margin-top:8px;">
     <button id="editHinge">Flip hinge</button>
@@ -262,15 +269,40 @@ renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
 if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
 document.body.appendChild(renderer.domElement);
-const vrBtn = VRButton.createButton(renderer);
-vrBtn.classList.add('vrbtn');
-document.getElementById('vrWrap').appendChild(vrBtn);
-// VRButton reassigns style.position/top/left on its own (device polling,
-// session start/end). A one-time class assignment loses that race, so pin
-// it back to static every time the library touches the style attribute.
-const pinVRButton = () => { if (vrBtn.style.position !== 'static') vrBtn.style.position = 'static'; };
-pinVRButton();
-new MutationObserver(pinVRButton).observe(vrBtn, { attributes:true, attributeFilter:['style'] });
+// VRButton's own fallback UI for "not supported" is a disabled, inert
+// button/link ("VR NOT SUPPORTED") - not useful to a visitor on a phone or
+// desktop browser. Detect support ourselves: use the real VRButton only
+// when a session is actually available, otherwise show a link to the VR
+// instructions page instead.
+(async () => {
+  const vrWrap = document.getElementById('vrWrap');
+  let supported = false;
+  if ('xr' in navigator){
+    try { supported = await navigator.xr.isSessionSupported('immersive-vr'); }
+    catch (err) { supported = false; }
+  }
+  if (supported){
+    const vrBtn = VRButton.createButton(renderer);
+    vrBtn.classList.add('vrbtn');
+    vrWrap.appendChild(vrBtn);
+    // VRButton reassigns style.position/top/left on its own (device polling,
+    // session start/end). A one-time class assignment loses that race, so pin
+    // it back to static every time the library touches the style attribute.
+    const pinVRButton = () => { if (vrBtn.style.position !== 'static') vrBtn.style.position = 'static'; };
+    pinVRButton();
+    new MutationObserver(pinVRButton).observe(vrBtn, { attributes:true, attributeFilter:['style'] });
+    renderer.xr.addEventListener('sessionstart', () => { vrBtn.style.display = 'none'; });
+    renderer.xr.addEventListener('sessionend', () => { vrBtn.style.display = ''; });
+  } else {
+    const link = document.createElement('a');
+    link.className = 'vrbtn';
+    link.href = 'vr-instructions.html';
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = 'Also Available on VR';
+    vrWrap.appendChild(link);
+  }
+})();
 
 scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a2620, 1.0));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -287,6 +319,15 @@ const grid = new THREE.GridHelper(300, 150, 0x39414f, 0x272d38);
 grid.position.y = 0.002;
 scene.add(grid);
 
+const teleportMarker = new THREE.Mesh(
+  new THREE.RingGeometry(0.28, 0.4, 32).rotateX(-Math.PI/2),
+  new THREE.MeshBasicMaterial({ color:0xe0a43c, transparent:true, opacity:0.7, depthWrite:false, side:THREE.DoubleSide })
+);
+teleportMarker.name = '__teleportMarker';
+teleportMarker.visible = false;
+teleportMarker.renderOrder = 1;
+scene.add(teleportMarker);
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
@@ -300,6 +341,7 @@ let worldRoot = null;
 let collidables = [floor];
 let interactables = [];        // {kind:'door'|'switch', ...}
 let grabbables = [];           // {node, home, homeWorldPos, homeWorldQuat, label}
+let lightSources = [];         // {node, path, light}
 let interactMeshes = [];       // meshes -> userData.inter
 let grabMeshes = [];           // meshes -> userData.grab
 let sceneLights = [];
@@ -307,6 +349,8 @@ const held = new Map();        // holder Object3D -> grab record
 let hoveredGrab = null;        // currently aimed-at grabbable, for hover highlight
 const HOVER_GLOW = 0x24303f;   // cool, dim: distinct from held (amber) and switch-on (green)
 const st = { yaw:0, pitch:0, velY:0, grounded:false };
+const spawnPos = new THREE.Vector3();
+let spawnYaw = 0;
 const keys = {};
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpV3 = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
@@ -464,7 +508,7 @@ function clearWorld(){
   if (worldRoot) scene.remove(worldRoot);
   worldRoot = null;
   collidables = [floor];
-  interactables = []; grabbables = [];
+  interactables = []; grabbables = []; lightSources = [];
   interactMeshes = []; grabMeshes = [];
   sceneLights = [];
   hoveredGrab = null;
@@ -514,6 +558,8 @@ function buildWorld(root, label, keepPlayer=false){
     player.position.set(0, 0, Math.min(b2.max.z + 2, b2.max.z + size.z*0.2 + 2));
     st.yaw = 0; st.pitch = 0; st.velY = 0;
     applyLook();
+    spawnPos.copy(player.position);
+    spawnYaw = 0;
   }
 
   currentLabel = label;
@@ -524,7 +570,13 @@ function buildWorld(root, label, keepPlayer=false){
   toast('Loaded ' + label);
   if (document.getElementById('editPanel').style.display==='block' && editPath){
     editTarget = pathIndex.get(editPath) || null;
-    if (editTarget) renderEditor();
+    if (editTarget){
+      // the rebuild reparents/recreates nodes, so re-derive the chain from
+      // the resolved target upward rather than trusting stale references
+      editChain = buildEditChain(editTarget);
+      editChainIdx = 0;
+      renderEditor();
+    }
     else document.getElementById('editPanel').style.display='none';
   }
 }
@@ -537,7 +589,7 @@ function classify(root){
 
   // walk tree, highest matching node wins, skip descendants of a match
   const stack = [...root.children];
-  const doors = [], switches = [], forcedGrabs = [];
+  const doors = [], switches = [], forcedGrabs = [], lightNodes = [];
   while (stack.length){
     const n = stack.pop();
     const ov = overrides.roles[nodePath(n, root)];
@@ -546,6 +598,7 @@ function classify(root){
       else if (ov.role==='switch') switches.push([n, false]);
       else if (ov.role==='button') switches.push([n, true]);
       else if (ov.role==='grabbable') forcedGrabs.push(n);
+      else if (ov.role==='light') lightNodes.push(n);
       else if (ov.role==='static') n.userData.noGrab = true;
       continue;
     }
@@ -555,6 +608,7 @@ function classify(root){
   }
   for (const [n, isBtn] of switches) makeSwitch(n, isBtn);
   for (const [n, hinge, locked] of doors) makeDoor(n, hinge, locked);
+  for (const n of lightNodes) makeLight(n);
   // nothing is grabbable by default; mark parts grabbable individually via
   // the Edit-mode role panel (T key / Edit button), same as door/switch roles
   for (const n of forcedGrabs) registerGrabbable(n);
@@ -659,6 +713,32 @@ function registerGrabbable(node){
   };
   grabbables.push(rec);
   markMeshes(node, 'grab', rec, grabMeshes);
+}
+
+function makeLight(node){
+  node.userData.noGrab = true;
+  const path = nodePath(node, loadedRoot);
+  cloneMaterials(node);
+  node.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(node);
+  const centerWorld = box.isEmpty() ? node.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
+  const light = new THREE.PointLight(0xfff2cc, 8, 10);
+  light.position.copy(node.worldToLocal(centerWorld.clone()));
+  light.name = (node.name || 'light') + '__lightsrc';
+  node.add(light);
+  sceneLights.push(light);
+  // tint the part itself so it visually reads as a light source, not just
+  // an invisible point light floating at its center
+  node.traverse(o => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats){
+      if (!m.emissive) continue;
+      m.emissive.setHex(0xfff2cc);
+      if ('emissiveIntensity' in m) m.emissiveIntensity = 1.2;
+    }
+  });
+  lightSources.push({ node, path, light });
 }
 
 /* ============================== interaction ============================== */
@@ -799,6 +879,9 @@ function resetAll(){
       for (const L of sceneLights){ L.getWorldPosition(tmpV);
         if (tmpV.distanceTo(i.worldPos) < 6) L.visible = false; } }
   }
+  player.position.copy(spawnPos);
+  st.yaw = spawnYaw; st.pitch = 0; st.velY = 0; st.grounded = false;
+  applyLook();
   toast('Scene reset');
 }
 
@@ -823,6 +906,7 @@ function nodePath(node, root){
 function pathFor(node){
   for (const i of interactables) if (i.node === node) return i.path;
   for (const g of grabbables) if (g.node === node) return g.path;
+  for (const l of lightSources) if (l.node === node) return l.path;
   return nodePath(node, loadedRoot);
 }
 function currentRole(node){
@@ -830,6 +914,7 @@ function currentRole(node){
     if (i.node === node) return i.kind==='door' ? 'door' : (i.isButton ? 'button' : 'switch');
   }
   for (const g of grabbables) if (g.node === node) return 'grabbable';
+  for (const l of lightSources) if (l.node === node) return 'light';
   return 'static';
 }
 function findInterFor(node){
@@ -854,8 +939,19 @@ document.getElementById('flySpeedSlider').oninput = e => {
 };
 
 /* ============================== in-situ editor ============================== */
-const ROLES = ['door','switch','button','grabbable','static'];
+const ROLES = ['door','switch','button','grabbable','static','light'];
 const editPanel = document.getElementById('editPanel');
+let editChain = [];     // named ancestors from the raycast hit (0) up to the top-level part
+let editChainIdx = 0;
+function buildEditChain(hitObject){
+  const chain = [];
+  let n = hitObject;
+  while (n && n !== loadedRoot && n !== worldRoot){
+    if (n.name && !/__hinge$/.test(n.name)) chain.push(n);
+    n = n.parent;
+  }
+  return chain;
+}
 function openEditor(){
   if (!worldRoot){ toast('Load a scene first'); return; }
   if (editPanel.style.display === 'block'){ editPanel.style.display='none'; return; }
@@ -864,23 +960,37 @@ function openEditor(){
   worldRoot.traverse(o => { if (o.isMesh) meshes.push(o); });
   const h = firstHit(r.intersectObjects(meshes, false));
   if (!h){ toast('Aim the reticle at a part, then press T / Edit'); return; }
-  // highest named ancestor below the loaded root
-  let n = h.object, best = null;
-  while (n && n !== loadedRoot && n !== worldRoot){
-    if (n.name && !/__hinge$/.test(n.name)) best = n;
-    n = n.parent;
-  }
-  editTarget = best || h.object;
+  editChain = buildEditChain(h.object);
+  if (!editChain.length){ toast('This part has no named nodes to edit'); return; }
+  editChainIdx = 0;
+  editTarget = editChain[0];
   editPath = pathFor(editTarget);
   renderEditor();
   editPanel.style.display = 'block';
   if (document.pointerLockElement) document.exitPointerLock();
 }
+document.getElementById('editParent').onclick = () => {
+  if (editChainIdx >= editChain.length - 1) return;
+  editChainIdx++;
+  editTarget = editChain[editChainIdx];
+  editPath = pathFor(editTarget);
+  renderEditor();
+};
+document.getElementById('editChild').onclick = () => {
+  if (editChainIdx <= 0) return;
+  editChainIdx--;
+  editTarget = editChain[editChainIdx];
+  editPath = pathFor(editTarget);
+  renderEditor();
+};
 function renderEditor(){
   const role = currentRole(editTarget);
   const ov = overrides.roles[editPath];
   document.getElementById('editName').textContent =
-    (editTarget.name || editPath) + '  [' + role + (ov ? ', edited' : '') + ']';
+    (editTarget.name || editPath) + '  [' + role + (ov ? ', edited' : '') + ']'
+    + `  (${editChainIdx + 1}/${editChain.length})`;
+  document.getElementById('editParent').disabled = editChainIdx >= editChain.length - 1;
+  document.getElementById('editChild').disabled = editChainIdx <= 0;
   const row = document.getElementById('editRoles');
   row.innerHTML = '';
   for (const rr of ROLES){
@@ -983,6 +1093,7 @@ function sceneInventory(){
     locked: i.kind==='door' ? !!i.locked : undefined
   });
   for (const g of grabbables) inv.push({ path: g.path, role:'grabbable' });
+  for (const l of lightSources) inv.push({ path: l.path, role:'light' });
   let count = inv.length;
   pathIndex.forEach((node, path) => {
     if (count >= 240 || !node.name) return;
@@ -1010,7 +1121,7 @@ async function runCommand(){
     'You are the control brain of a WebXR GLB walkthrough app. The user gives a natural-language command about the loaded 3D scene. ' +
     'Respond with ONLY valid JSON, no markdown fences, no prose, in the form {"ops":[...],"note":"one short confirmation sentence"}. ' +
     'Allowed ops: ' +
-    '{"op":"setRole","path":P,"role":"door|switch|button|grabbable|static","hinge":"left|right"} converts a node (hinge only for doors). ' +
+    '{"op":"setRole","path":P,"role":"door|switch|button|grabbable|static|light","hinge":"left|right"} converts a node (hinge only for doors). ' +
     '{"op":"flipHinge","path":P} flips a door hinge side. ' +
     '{"op":"setLocked","path":P,"locked":true|false} locks or unlocks a door; a locked door will not open. ' +
     '{"op":"setDoorState","path":P,"open":true|false}. ' +
@@ -1357,8 +1468,8 @@ function updateMovement(dt){
   if (keys['KeyA']) ix -= 1;
   if (keys['KeyD']) ix += 1;
   if (mode==='fly'){
-    if (keys['Space']) iy += 1;
-    if (keys['KeyC'] || keys['ShiftLeft']) iy -= 1;
+    if (keys['Space'] || keys['ArrowUp']) iy += 1;
+    if (keys['KeyC'] || keys['ShiftLeft'] || keys['ArrowDown']) iy -= 1;
     if (mUpHeld) iy += 1;
     if (mDownHeld) iy -= 1;
   } else if (keys['Space'] && st.grounded){ st.velY = 4.4; st.grounded = false; }
@@ -1433,18 +1544,49 @@ function updateHover(){
   setHint(held.get(camera) ? ((isTouch?'Reset':'E release, R reset') + ' — holding ' + held.get(camera).label) : '');
 }
 
+function updateTeleportMarker(){
+  if (mode !== 'teleport' || renderer.xr.isPresenting || !worldRoot){
+    teleportMarker.visible = false;
+    return;
+  }
+  const r = centerRay();
+  r.far = 30;
+  const hit = firstHit(r.intersectObjects(collidables, false));
+  if (hit && hit.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y > 0.6){
+    teleportMarker.position.set(hit.point.x, hit.point.y + 0.02, hit.point.z);
+    teleportMarker.scale.setScalar(1 + 0.08 * Math.sin(clock.elapsedTime * 4));
+    teleportMarker.visible = true;
+  } else {
+    teleportMarker.visible = false;
+  }
+}
+
 /* ============================== drop physics ============================== */
 const DROP_GRAVITY = 9.8;
-const DROP_BOUNCE = 0.35;      // restitution coefficient
-const DROP_FRICTION = 0.7;     // horizontal velocity kept per bounce
-const DROP_ANG_DAMP = 0.88;    // angular velocity damped per bounce
-const DROP_SETTLE_VEL = 0.08;  // velocity below which we consider it settled
+const DROP_BOUNCE = 0.22;      // restitution coefficient - low, so it settles fast rather than bouncing around
+const DROP_FRICTION = 0.55;    // horizontal velocity kept per bounce
+const DROP_ANG_DAMP = 0.5;     // angular velocity damped per bounce
+const DROP_SETTLE_VEL = 0.15;  // speed below which we consider it settled
+const DROP_MAX_BOUNCES = 3;    // force-settle after this many bounces regardless of speed
 const DROP_MAX_TIME = 4;       // max seconds before force-settling
+const DROP_SETTLE_TIME = 0.15; // seconds to ease tilt flat once settled, instead of freezing mid-tumble
 
 function updateDropping(dt){
   for (let i = dropping.length - 1; i >= 0; i--){
     const d = dropping[i];
     d.time += dt;
+
+    if (d.settling){
+      // ease any leftover tumble tilt flat instead of leaving the part
+      // frozen at whatever angle it happened to stop tumbling at
+      d.settleT += dt;
+      const p = Math.min(d.settleT / DROP_SETTLE_TIME, 1);
+      const k = 1 - (1 - p) * (1 - p) * (1 - p);   // ease-out cubic
+      d.node.rotation.x = THREE.MathUtils.lerp(d.settleFromRotX, 0, k);
+      d.node.rotation.z = THREE.MathUtils.lerp(d.settleFromRotZ, 0, k);
+      if (p >= 1) dropping.splice(i, 1);
+      continue;
+    }
 
     // gravity
     d.vel.y -= DROP_GRAVITY * dt;
@@ -1508,19 +1650,25 @@ function updateDropping(dt){
       d.bounces++;
 
       // check if settled
-      if (Math.abs(d.vel.y) < DROP_SETTLE_VEL || d.bounces >= 5 || d.time > DROP_MAX_TIME){
-        d.vel.set(0, 0, 0);
-        d.angVel.set(0, 0, 0);
-        dropping.splice(i, 1);
+      const speed = Math.hypot(d.vel.x, d.vel.y, d.vel.z);
+      if (speed < DROP_SETTLE_VEL || d.bounces >= DROP_MAX_BOUNCES || d.time > DROP_MAX_TIME){
+        beginSettle(d);
       }
     }
 
     // timeout safety
-    if (d.time > DROP_MAX_TIME){
-      d.vel.set(0, 0, 0);
-      dropping.splice(i, 1);
+    if (!d.settling && d.time > DROP_MAX_TIME){
+      beginSettle(d);
     }
   }
+}
+function beginSettle(d){
+  d.vel.set(0, 0, 0);
+  d.angVel.set(0, 0, 0);
+  d.settling = true;
+  d.settleT = 0;
+  d.settleFromRotX = d.node.rotation.x;
+  d.settleFromRotZ = d.node.rotation.z;
 }
 
 /* ============================== animation loop ============================== */
@@ -1550,6 +1698,10 @@ renderer.setAnimationLoop(() => {
 
   hoverTick += dt;
   if (hoverTick > 0.08){ hoverTick = 0; updateHover(); }
+
+  // every frame, not throttled like updateHover(), so the marker tracks
+  // smoothly as the camera moves
+  updateTeleportMarker();
 
   // drop physics for released parts
   updateDropping(dt);

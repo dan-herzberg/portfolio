@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VR Instructions | D. Herzberg</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="index.html">D. HERZBERG</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="projects.html">Side Projects</a></li>
+        </ul>
+    </nav>
+
+    <header class="page-header container">
+        <h1>Using the GLB Walkthrough in VR</h1>
+        <p>The viewer supports WebXR headsets like the Meta Quest 2 &mdash; no app install required.</p>
+    </header>
+
+    <section class="container">
+        <h2 class="section-title">Getting in</h2>
+        <div class="about-text">
+            <p>Open this site in the headset's built-in browser (e.g. the Quest Browser) and go to the
+                <a href="viewer.html">3D Model Viewer</a> page. Because WebXR requires a secure connection, this
+                only works over HTTPS &mdash; which is exactly how this site is hosted, so no extra setup is needed.</p>
+            <p>Load a model (or press <strong>Load Demo Room</strong> to try it immediately), then press
+                <strong>Enter VR</strong> in the top-right corner and put on your headset.</p>
+        </div>
+    </section>
+
+    <section class="container">
+        <h2 class="section-title">Quest 2 Controls</h2>
+        <div class="project-grid">
+            <div class="project-card">
+                <h3>Move &amp; look</h3>
+                <p>Left stick moves. Right stick snap-turns your view in fixed increments.</p>
+            </div>
+            <div class="project-card">
+                <h3>Interact</h3>
+                <p>Trigger opens doors/flips switches when aimed at one, or teleports you to the floor in
+                    Teleport mode.</p>
+            </div>
+            <div class="project-card">
+                <h3>Grab</h3>
+                <p>Grip picks up a grabbable part; squeeze again (or move away and release) to let go. Dropped
+                    parts fall and settle naturally.</p>
+            </div>
+            <div class="project-card">
+                <h3>Mode &amp; reset</h3>
+                <p><strong>A</strong> cycles Walk / Fly / Teleport mode. <strong>X</strong> resets the whole
+                    scene &mdash; parts, doors, switches, and your position.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="container">
+        <h2 class="section-title">Good to know</h2>
+        <div class="about-text">
+            <p>Keep models under roughly 1M triangles and 100 MB for a comfortable frame rate on Quest 2 &mdash;
+                decimate or compress heavier models before loading if things feel sluggish.</p>
+            <p>The in-scene part editor and the Claude command bar are flat-screen-only features. Make any edits
+                on desktop first, export them, and the same overrides file will drive your VR session.</p>
+        </div>
+        <a href="viewer.html" class="btn" style="margin-top:1rem;">Back to the Viewer</a>
+    </section>
+
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg</p>
+    </footer>
+
+    <script src="js/nav.js"></script>
+</body>
+</html>
