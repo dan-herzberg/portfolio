@@ -33,6 +33,8 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 **Desktop/Touch toggle:** the app guesses whether you're on a touch device from the browser's pointer capabilities, which can misfire on touchscreen laptops. Use the Desktop/Touch buttons in the Movement panel to force the correct mode if the on-screen joystick appears when you have a mouse, or vice versa.
 
+**Collapsing the panels:** the small circular button above the Scene panel minimizes the whole left-side panel stack down to just that button, leaving the full view unobstructed — click it again to bring the panels back. It starts collapsed by default on touch devices, since the panel stack eats a lot of a phone screen.
+
 **Teleport mode** shows a ring on the floor wherever you're currently aiming, so you can see exactly where you'll land before you click/trigger.
 
 ## Grabbing parts

@@ -16,6 +16,9 @@
   .mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
 
   #hud{position:fixed;top:10px;left:10px;z-index:10;display:flex;flex-direction:column;gap:8px;max-width:280px;}
+  #hudToggle{align-self:flex-start;width:32px;height:32px;padding:0;border-radius:50%;font-size:13px;line-height:1;}
+  #hudPanels{display:flex;flex-direction:column;gap:8px;}
+  #hud.collapsed #hudPanels{display:none;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;backdrop-filter:blur(6px);}
   .row{display:flex;gap:6px;flex-wrap:wrap;}
   button{background:#1b2230;color:var(--text);border:1px solid var(--line);border-radius:6px;
@@ -100,44 +103,47 @@
 </head>
 <body>
 <div id="hud">
-  <div class="panel">
-    <div class="label">Scene</div>
-    <div class="row grid3">
-      <button id="btnLoad">Load &#9662;</button>
-      <button id="btnReset">Reset scene</button>
-      <button id="btnExit">Exit</button>
+  <button id="hudToggle" aria-label="Toggle panels">&#9664;</button>
+  <div id="hudPanels">
+    <div class="panel">
+      <div class="label">Scene</div>
+      <div class="row grid3">
+        <button id="btnLoad">Load &#9662;</button>
+        <button id="btnReset">Reset scene</button>
+        <button id="btnExit">Exit</button>
+      </div>
+      <div class="row grid3" style="margin-top:6px;">
+        <button id="btnExport">Export edits</button>
+        <button id="btnImport">Import edits</button>
+        <button id="btnOpaque">Force opaque</button>
+      </div>
     </div>
-    <div class="row grid3" style="margin-top:6px;">
-      <button id="btnExport">Export edits</button>
-      <button id="btnImport">Import edits</button>
-      <button id="btnOpaque">Force opaque</button>
+    <div class="panel">
+      <div class="label">Movement</div>
+      <div class="row">
+        <button id="mWalk" class="on">Walk</button>
+        <button id="mFly">Fly</button>
+        <button id="mTele">Teleport</button>
+      </div>
+      <div class="row" style="margin-top:6px;align-items:center;">
+        <span class="mono" style="font-size:11px;color:var(--dim);">Fly speed</span>
+        <input type="range" id="flySpeedSlider" min="1" max="30" step="0.5" value="6.5" style="flex:1;min-width:80px;">
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <button id="inputDesktop">Desktop</button>
+        <button id="inputTouch">Touch</button>
+      </div>
     </div>
-  </div>
-  <div class="panel">
-    <div class="label">Movement</div>
-    <div class="row">
-      <button id="mWalk" class="on">Walk</button>
-      <button id="mFly">Fly</button>
-      <button id="mTele">Teleport</button>
-    </div>
-    <div class="row" style="margin-top:6px;align-items:center;">
-      <span class="mono" style="font-size:11px;color:var(--dim);">Fly speed</span>
-      <input type="range" id="flySpeedSlider" min="1" max="30" step="0.5" value="6.5" style="flex:1;min-width:80px;">
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <button id="inputDesktop">Desktop</button>
-      <button id="inputTouch">Touch</button>
-    </div>
-  </div>
-  <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded</div>
-  <div class="panel">
-    <div class="label">Simplify (hide smallest parts)</div>
-    <div class="row" style="align-items:center;">
-      <input type="range" id="simplifySlider" min="0" max="10" step="1" value="0" style="flex:1;min-width:80px;">
-      <span class="mono" id="simplifyPct" style="font-size:11px;color:var(--dim);min-width:34px;text-align:right;">0%</span>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <button id="btnSimplify">Apply</button>
+    <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded</div>
+    <div class="panel">
+      <div class="label">Simplify (hide smallest parts)</div>
+      <div class="row" style="align-items:center;">
+        <input type="range" id="simplifySlider" min="0" max="10" step="1" value="0" style="flex:1;min-width:80px;">
+        <span class="mono" id="simplifyPct" style="font-size:11px;color:var(--dim);min-width:34px;text-align:right;">0%</span>
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <button id="btnSimplify">Apply</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1244,6 +1250,18 @@ document.getElementById('inputDesktop').onclick = () => { isTouch = false; apply
 document.getElementById('inputTouch').onclick = () => { isTouch = true; applyInputMode(); toast('Input: Touch'); };
 applyInputMode();
 document.getElementById('reticle').style.display = 'block';
+
+/* ============================== collapsible HUD ============================== */
+const hud = document.getElementById('hud');
+const hudToggle = document.getElementById('hudToggle');
+function setHudCollapsed(collapsed){
+  hud.classList.toggle('collapsed', collapsed);
+  hudToggle.innerHTML = collapsed ? '&#9654;' : '&#9664;';
+}
+hudToggle.onclick = () => setHudCollapsed(!hud.classList.contains('collapsed'));
+// mobile screens are cramped, so start collapsed there; this only sets the
+// initial default and doesn't fight the manual Desktop/Touch override above
+setHudCollapsed(isTouch);
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
