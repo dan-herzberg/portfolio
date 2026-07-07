@@ -411,7 +411,7 @@ function setForceOpaque(on){
   document.getElementById('btnOpaque').classList.toggle('on', on);
   if (!worldRoot) return;
   worldRoot.traverse(o => {
-    if (!o.isMesh) return;
+    if (!o.isMesh || o.userData.isGhost) return;   // ghosts are always meant to look translucent
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats){
       if (on){
@@ -450,7 +450,7 @@ document.getElementById('btnSimplify').onclick = () => {
   const notch = parseInt(document.getElementById('simplifySlider').value, 10);
   const pct = notch * 0.03;
   const meshes = [];
-  worldRoot.traverse(o => { if (o.isMesh && o.name !== '__floor') meshes.push(o); });
+  worldRoot.traverse(o => { if (o.isMesh && o.name !== '__floor' && !o.userData.isGhost) meshes.push(o); });
   if (!meshes.length){ toast('No parts to simplify'); return; }
   for (const m of meshes) m.visible = true;
   const removeN = Math.round(meshes.length * pct);
@@ -519,7 +519,7 @@ function clearWorld(){
 function countTris(){
   let tris = 0;
   worldRoot.traverse(o => {
-    if (!o.isMesh || !o.visible || !o.geometry) return;
+    if (!o.isMesh || !o.visible || !o.geometry || o.userData.isGhost) return;
     tris += o.geometry.index ? o.geometry.index.count/3 : (o.geometry.attributes.position?.count||0)/3;
   });
   return Math.round(tris);
@@ -529,6 +529,19 @@ function updateStats(){
     + `${interactables.filter(i=>i.kind==='door').length} doors | `
     + `${interactables.filter(i=>i.kind==='switch').length} switches | `
     + `${grabbables.length} grabbable parts`;
+}
+
+const PEDESTAL_MAX_DIM = 0.6096;   // 24 inches in meters
+function addPedestal(parent, x, y, z){
+  const pedestal = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.28, 0.32, 0.85, 24),
+    new THREE.MeshStandardMaterial({ color:0x3a4250, roughness:0.8, metalness:0.1 })
+  );
+  pedestal.name = 'Pedestal_Rest';
+  pedestal.userData.noGrab = true;
+  pedestal.position.set(x, y, z);
+  parent.add(pedestal);
+  return pedestal;
 }
 
 function buildWorld(root, label, keepPlayer=false){
@@ -549,6 +562,16 @@ function buildWorld(root, label, keepPlayer=false){
   root.traverse(o => { if (o.isLight) sceneLights.push(o); });
 
   classify(root);
+
+  // small real GLB loads (not the demo room, which already has its own) get
+  // a pedestal to rest dropped parts on; skip it for large models where a
+  // stray pedestal prop would just be clutter
+  if (lastSource && lastSource.kind === 'glb' && !box.isEmpty()){
+    const size = box.getSize(tmpV2);
+    if (Math.max(size.x, size.y, size.z) < PEDESTAL_MAX_DIM){
+      addPedestal(worldRoot, size.x/2 + 0.6, 0.425, 0);
+    }
+  }
 
   // collidables: every mesh in world plus fallback floor
   worldRoot.traverse(o => { if (o.isMesh) collidables.push(o); });
@@ -715,6 +738,47 @@ function registerGrabbable(node){
   };
   grabbables.push(rec);
   markMeshes(node, 'grab', rec, grabMeshes);
+}
+
+function makeGhostMaterial(mat){
+  const m = mat.clone();
+  m.transparent = true;
+  m.opacity = 0.3;
+  m.depthWrite = false;
+  if (m.emissive) m.emissive.setHex(0x000000);
+  return m;
+}
+function ensureGhost(rec){
+  if (rec.ghost) return rec.ghost;
+  const ghost = rec.node.clone(true);
+  ghost.traverse(o => {
+    if (!o.isMesh) return;
+    o.userData = { isGhost: true };
+    o.material = Array.isArray(o.material) ? o.material.map(makeGhostMaterial) : makeGhostMaterial(o.material);
+  });
+  ghost.position.copy(rec.home.pos);
+  ghost.quaternion.copy(rec.home.quat);
+  ghost.scale.copy(rec.home.scale);
+  ghost.visible = false;
+  ghost.name = (rec.node.name || 'part') + '__ghost';
+  rec.home.parent.add(ghost);
+  rec.ghost = ghost;
+  return ghost;
+}
+function updateGhosts(){
+  const heldRecs = new Set(held.values());
+  for (const rec of grabbables){
+    if (!heldRecs.has(rec)){
+      if (rec.ghost) rec.ghost.visible = false;
+      continue;
+    }
+    const ghost = ensureGhost(rec);
+    rec.node.getWorldPosition(tmpV);
+    rec.node.getWorldQuaternion(tmpQ);
+    const d = tmpV.distanceTo(rec.homeWorldPos);
+    const a = 2 * Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
+    ghost.visible = d < SNAP_DIST && a < SNAP_ANG;
+  }
 }
 
 function makeLight(node){
@@ -959,7 +1023,7 @@ function openEditor(){
   if (editPanel.style.display === 'block'){ editPanel.style.display='none'; return; }
   const r = centerRay(); r.far = 8;
   const meshes = [];
-  worldRoot.traverse(o => { if (o.isMesh) meshes.push(o); });
+  worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
   const h = firstHit(r.intersectObjects(meshes, false));
   if (!h){ toast('Aim the reticle at a part, then press T / Edit'); return; }
   editChain = buildEditChain(h.object);
@@ -1439,7 +1503,11 @@ function updateLasers(){
 
 /* ============================== movement ============================== */
 function currentGroundY(x, z, fromY){
-  ray.ray.origin.set(x, fromY + 1.9, z);
+  // origin needs enough headroom above fromY to still find the floor while
+  // jumping, but not so much that it starts above a low ceiling (the demo
+  // room's is 2.6m) and reports that as ground instead - a jump peaks
+  // around 1m up, so +1.0 clears that with margin to spare either way
+  ray.ray.origin.set(x, fromY + 1.0, z);
   ray.ray.direction.set(0,-1,0);
   ray.far = 6;
   const h = firstHit(ray.intersectObjects(collidables, false));
@@ -1590,8 +1658,8 @@ function updateDropping(dt){
       d.settleT += dt;
       const p = Math.min(d.settleT / DROP_SETTLE_TIME, 1);
       const k = 1 - (1 - p) * (1 - p) * (1 - p);   // ease-out cubic
-      d.node.rotation.x = THREE.MathUtils.lerp(d.settleFromRotX, 0, k);
-      d.node.rotation.z = THREE.MathUtils.lerp(d.settleFromRotZ, 0, k);
+      d.node.rotation.x = THREE.MathUtils.lerp(d.settleFromRotX, d.settleToRotX, k);
+      d.node.rotation.z = THREE.MathUtils.lerp(d.settleFromRotZ, d.settleToRotZ, k);
       if (p >= 1) dropping.splice(i, 1);
       continue;
     }
@@ -1636,8 +1704,11 @@ function updateDropping(dt){
 
     // floor collision — find actual ground height (excluding the falling
     // part's own meshes, which are in `collidables` too and would otherwise
-    // self-intersect the downward ray)
-    ray.ray.origin.set(tmpV.x, tmpV.y + 2, tmpV.z);
+    // self-intersect the downward ray). Start just above the part's own
+    // current bottom, not high above its center - starting far above would
+    // hit a ceiling or overhead beam first in an enclosed room and report
+    // that as "ground" instead of the real floor below.
+    ray.ray.origin.set(tmpV.x, bottomY + 0.1, tmpV.z);
     ray.ray.direction.set(0, -1, 0);
     ray.far = 10;
     const groundTargets = collidables.filter(o => !isDescendantOf(o, d.node));
@@ -1677,6 +1748,12 @@ function beginSettle(d){
   d.settleT = 0;
   d.settleFromRotX = d.node.rotation.x;
   d.settleFromRotZ = d.node.rotation.z;
+  // level toward the part's own authored resting tilt, not world-zero - a
+  // shape like a torus rests naturally at rotation.x = PI/2, not 0, and
+  // forcing it to 0 is exactly what made it stand up on end after a drop
+  const homeEuler = new THREE.Euler().setFromQuaternion(d.rec.home.quat, 'XYZ');
+  d.settleToRotX = homeEuler.x;
+  d.settleToRotZ = homeEuler.z;
 }
 
 /* ============================== animation loop ============================== */
@@ -1714,23 +1791,85 @@ renderer.setAnimationLoop(() => {
   // drop physics for released parts
   updateDropping(dt);
 
+  // home-slot preview while carrying a part close enough to snap
+  updateGhosts();
+
   renderer.render(scene, camera);
 });
 
 /* ============================== demo scene ============================== */
 document.getElementById('btnDemo').onclick = () => buildDemo(false);
+// Small procedural textures for the demo room's floor/walls/ceiling, drawn to
+// an offscreen canvas - keeps this a single dependency-free file instead of
+// pulling in external image assets for three flat surfaces.
+function makeProceduralTexture(kind, size=256){
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (kind === 'floor'){
+    ctx.fillStyle = '#454c56';
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+    ctx.lineWidth = 3;
+    const tiles = 4;
+    for (let i = 1; i < tiles; i++){
+      const p = (size/tiles) * i;
+      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke();
+    }
+    for (let i = 0; i < 700; i++){
+      ctx.fillStyle = `rgba(255,255,255,${Math.random()*0.05})`;
+      ctx.fillRect(Math.random()*size, Math.random()*size, 2, 2);
+    }
+  } else if (kind === 'wall'){
+    ctx.fillStyle = '#565f6c';
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+    ctx.lineWidth = 2;
+    const panels = 3;
+    for (let i = 1; i < panels; i++){
+      const p = (size/panels) * i;
+      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.beginPath(); ctx.moveTo(0, size*0.5); ctx.lineTo(size, size*0.5); ctx.stroke();
+  } else { // ceiling
+    ctx.fillStyle = '#666f7c';
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 2;
+    const tiles = 2;
+    for (let i = 1; i < tiles; i++){
+      const p = (size/tiles) * i;
+      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function buildDemo(keepPlayer=false){
   const M = (c, r=0.7, m=0.1) => new THREE.MeshStandardMaterial({ color:c, roughness:r, metalness:m });
   const root = new THREE.Group(); root.name = 'DemoRoom';
 
+  const floorTex = makeProceduralTexture('floor'); floorTex.repeat.set(4, 3);
+  const wallTex = makeProceduralTexture('wall'); wallTex.repeat.set(4, 2);
+  const ceilingTex = makeProceduralTexture('ceiling'); ceilingTex.repeat.set(4, 3);
+  const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness:0.9, metalness:0 });
+  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness:0.85, metalness:0 });
+  const ceilingMat = new THREE.MeshStandardMaterial({ map: ceilingTex, roughness:0.9, metalness:0 });
+
   const walls = new THREE.Group(); walls.name = 'Structure'; walls.userData.noGrab = true;
-  const wallMat = M(0x39414d, 0.95, 0);
   const mk = (w,h,d,x,y,z,mat=wallMat,parent=walls) => {
     const b = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
     b.position.set(x,y,z); parent.add(b); return b;
   };
   // room 8x6, opening in front wall for the door
-  mk(8,0.15,6, 0,0.075,0);                       // slab
+  mk(8,0.15,6, 0,0.075,0, floorMat);              // floor slab
+  mk(8,0.15,6, 0,2.675,0, ceilingMat);             // ceiling slab
   mk(8,2.6,0.15, 0,1.3,-3);                      // back
   mk(0.15,2.6,6, -4,1.3,0);                      // left
   mk(0.15,2.6,6,  4,1.3,0);                      // right
@@ -1774,11 +1913,7 @@ function buildDemo(keepPlayer=false){
   root.add(lamp);
 
   // pedestal near room center for dropped/small parts to rest on
-  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.32,0.85,24), M(0x3a4250,0.8,0.1));
-  pedestal.name = 'Pedestal_Rest';
-  pedestal.userData.noGrab = true;
-  pedestal.position.set(0,0.425,0);
-  root.add(pedestal);
+  addPedestal(root, 0, 0.425, 0);
 
   // workbench with grabbable parts
   mk(1.8,0.08,0.9, 1.8,0.85,-1.6, M(0x4a3c2c,0.85,0), root);
