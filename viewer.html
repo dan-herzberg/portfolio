@@ -80,6 +80,9 @@
     background:rgba(224,164,60,.5);}
   #mbtns{position:fixed;right:14px;bottom:70px;z-index:10;display:flex;flex-direction:column;gap:8px;}
   #mbtns button{min-width:88px;padding:12px 10px;font-size:13px;}
+  /* lit when the aimed target makes that action possible right now */
+  #mbtns button.can{border-color:var(--accent);color:var(--accent);
+    box-shadow:0 0 10px rgba(224,164,60,.35);}
   #vslide{position:fixed;right:110px;bottom:70px;z-index:10;display:none;flex-direction:column;gap:8px;}
 
   #editPanel{position:fixed;left:50%;top:16%;transform:translateX(-50%);width:min(320px,92vw);
@@ -116,6 +119,9 @@
         <button id="btnExport">Export edits</button>
         <button id="btnImport">Import edits</button>
         <button id="btnOpaque">Force opaque</button>
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <button id="btnTheme">Light mode</button>
       </div>
     </div>
     <div class="panel">
@@ -306,7 +312,8 @@ document.body.appendChild(renderer.domElement);
   }
 })();
 
-scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a2620, 1.0));
+const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x2a2620, 1.0);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(6, 12, 4);
 scene.add(sun);
@@ -320,6 +327,38 @@ scene.add(floor);
 const grid = new THREE.GridHelper(300, 150, 0x39414f, 0x272d38);
 grid.position.y = 0.002;
 scene.add(grid);
+
+/* ============================== environment theme ============================== */
+// light/dark toggle for the surrounding environment (sky, fog, ground,
+// light intensities) - loaded models and the demo room are untouched
+const ENV_THEMES = {
+  dark:  { bg:0x14181f, hemiSky:0xbfd4ff, hemiGround:0x2a2620, hemiI:1.0,
+           sunI:1.6, floorC:0x1d2129, gridC:0x2e3542 },
+  light: { bg:0xdfe7ee, hemiSky:0xffffff, hemiGround:0x8f8a80, hemiI:1.25,
+           sunI:2.0, floorC:0xb9c0ca, gridC:0x9aa4b0 }
+};
+let envTheme = 'dark';
+function applyEnvTheme(){
+  const t = ENV_THEMES[envTheme];
+  scene.background.setHex(t.bg);
+  scene.fog.color.setHex(t.bg);
+  hemi.color.setHex(t.hemiSky);
+  hemi.groundColor.setHex(t.hemiGround);
+  hemi.intensity = t.hemiI;
+  sun.intensity = t.sunI;
+  floor.material.color.setHex(t.floorC);
+  // GridHelper ships with per-vertex colors; a flat material color is the
+  // simplest way to retint it at runtime
+  grid.material.vertexColors = false;
+  grid.material.color.setHex(t.gridC);
+  grid.material.needsUpdate = true;
+  const btn = document.getElementById('btnTheme');
+  if (btn) btn.textContent = envTheme === 'dark' ? 'Light mode' : 'Dark mode';
+}
+document.getElementById('btnTheme').addEventListener('click', () => {
+  envTheme = envTheme === 'dark' ? 'light' : 'dark';
+  applyEnvTheme();
+});
 
 const teleportMarker = new THREE.Mesh(
   new THREE.RingGeometry(0.28, 0.4, 32).rotateX(-Math.PI/2),
@@ -342,7 +381,7 @@ let mode = 'walk';
 let worldRoot = null;
 let collidables = [floor];
 let interactables = [];        // {kind:'door'|'switch', ...}
-let grabbables = [];           // {node, home, homeWorldPos, homeWorldQuat, label}
+let grabbables = [];           // recs: {node, label, path, snapDist, home:{parent,pos,quat,scale}, ...lazy fields}
 let lightSources = [];         // {node, path, light}
 let interactMeshes = [];       // meshes -> userData.inter
 let grabMeshes = [];           // meshes -> userData.grab
@@ -380,9 +419,11 @@ const CONTACT_DIRS = (() => {
 
 const DOOR_RE = /door|gate|hatch|portal/i;
 const SWITCH_RE = /switch|button|btn|lever|toggle/i;
-const SNAP_ANG = 0.5;   // radians; snap distance is per-part, see registerGrabbable()
 let walkSpeed = 3.6, flySpeed = 6.5;
 const dropping = [];           // {rec, vel:Vector3, angVel:Vector3, bounces:0, time:0}
+const composites = [];         // composite recs whose components snap together (see updateAssembly)
+const WELD_FRAC = 0.5;         // fraction of the smaller half's snapDist within which halves weld
+const WELD_COOLDOWN_MS = 1500; // no auto re-weld right after pulling a component out
 const HOLD_HISTORY_MS = 150;   // window used to derive throw velocity from recent hold motion
 const MAX_THROW_SPEED = 8;     // m/s cap on release velocity derived from hold history
 const MAX_THROW_ANGSPEED = 20; // rad/s cap on release angular velocity
@@ -535,6 +576,7 @@ function clearWorld(){
   interactables = []; grabbables = []; lightSources = [];
   interactMeshes = []; grabMeshes = [];
   sceneLights = [];
+  composites.length = 0;
   hoveredGrab = null;
 }
 
@@ -742,7 +784,7 @@ function makeSwitch(node, isButton){
 }
 
 function registerGrabbable(node){
-  if (node.userData.grabReg) return;
+  if (node.userData.grabReg) return node.userData.grabRec;
   node.userData.grabReg = true;
   cloneMaterials(node);
   node.updateMatrixWorld(true);
@@ -759,12 +801,12 @@ function registerGrabbable(node){
       pos: node.position.clone(),
       quat: node.quaternion.clone(),
       scale: node.scale.clone()
-    },
-    homeWorldPos: node.getWorldPosition(new THREE.Vector3()),
-    homeWorldQuat: node.getWorldQuaternion(new THREE.Quaternion())
+    }
   };
   grabbables.push(rec);
+  node.userData.grabRec = rec;
   markMeshes(node, 'grab', rec, grabMeshes);
+  return rec;
 }
 
 const CONTACT_MAX_PTS_PER_MESH = 4000; // stride-sample vertex buffers above this size
@@ -784,13 +826,10 @@ const CONTACT_MAX_POINTS = 40;         // hard cap on total cached contact point
 // true convex hull: for each of 26 fixed directions (CONTACT_DIRS), find the
 // mesh vertex (vertices, if tied) with the max dot product against that
 // direction. A true hull throws on the near-planar point sets that thin CAD
-// parts (washers, brackets, sheet metal) commonly produce; this never does,
-// costs O(directions x vertices), and gives the same emergent per-shape
-// contact-count behavior: a box ties ~4 vertices per face, a coarse
-// cylinder/cone resting on its side only ever ties ~2 rim vertices, a
-// sphere never ties more than 1 - so maxStableContacts (the largest tie
-// seen across all directions, capped at 3) falls out of the geometry
-// itself rather than needing a per-shape-type special case.
+// parts (washers, brackets, sheet metal) commonly produce; this never does
+// and costs O(directions x vertices). Every mesh is faceted, so every shape
+// (even a "sphere") can eventually rest 3 sampled points on a surface -
+// settling always requires 3 simultaneous contacts, no per-shape cap.
 function ensureContactGeometry(rec){
   if (rec.contactPts) return;
   const node = rec.node;
@@ -824,13 +863,11 @@ function ensureContactGeometry(rec){
   );
 
   const pts = [];
-  let maxTie = 1;
   outer:
   for (const dir of CONTACT_DIRS){
     let best = -Infinity;
     for (const p of localVerts){ const d = p.dot(dir); if (d > best) best = d; }
     const tied = localVerts.filter(p => best - p.dot(dir) < CONTACT_TIE_EPS);
-    if (tied.length > maxTie) maxTie = tied.length;
     for (const p of tied){
       if (!pts.some(q => q.distanceTo(p) < CONTACT_CLUSTER_EPS)) pts.push(p.clone());
       if (pts.length >= CONTACT_MAX_POINTS) break outer;
@@ -845,10 +882,8 @@ function ensureContactGeometry(rec){
         z ? localBox.max.z : localBox.min.z
       ));
     }
-    maxTie = 4;
   }
   rec.contactPts = pts;
-  rec.maxStableContacts = Math.min(3, maxTie);
 }
 
 // A translucent box outline at the part's home slot, shown while carrying it
@@ -887,6 +922,52 @@ function ensureGhost(rec){
   rec.ghost = ghost;
   return ghost;
 }
+// Current world position of a rec's home slot, derived from the home
+// parent's CURRENT pose rather than a snapshot taken at registration - so a
+// nested part (a lid, a part that lives inside a carried box) snaps to
+// wherever its home parent is right now, not where it was at load time.
+function homeWorldPosOf(rec, out){
+  rec.home.parent.updateWorldMatrix(true, false);
+  return out.copy(rec.home.pos).applyMatrix4(rec.home.parent.matrixWorld);
+}
+
+// A thin vertical line from each grabbed part straight down to whatever is
+// below it, as a depth cue - judging a carried part's height above the
+// floor is otherwise hard, especially in VR. One line per possible holder
+// (mouse camera + two VR grips), lazily created, hidden when that hand is
+// empty; lines live directly in the scene so they never leak across world
+// reloads.
+const depthLines = new Map();   // holder -> THREE.Line
+function updateDepthLines(){
+  for (const [holder, line] of depthLines){
+    if (!held.has(holder)) line.visible = false;
+  }
+  for (const [holder, rec] of held){
+    let line = depthLines.get(holder);
+    if (!line){
+      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+      line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color:0xe0a43c, transparent:true, opacity:0.65 }));
+      line.frustumCulled = false;
+      scene.add(line);
+      depthLines.set(holder, line);
+    }
+    rec.node.getWorldPosition(physV1);
+    const box = new THREE.Box3().setFromObject(rec.node);
+    const bottomY = box.isEmpty() ? physV1.y : box.min.y;
+    // firstHit skips held meshes, so the carried part never blocks its own ray
+    ray.ray.origin.set(physV1.x, bottomY + 0.02, physV1.z);
+    ray.ray.direction.set(0, -1, 0);
+    ray.far = 30;
+    const hit = firstHit(ray.intersectObjects(collidables, false));
+    const groundY = hit ? hit.point.y : 0;
+    const pos = line.geometry.attributes.position;
+    pos.setXYZ(0, physV1.x, bottomY, physV1.z);
+    pos.setXYZ(1, physV1.x, groundY, physV1.z);
+    pos.needsUpdate = true;
+    line.visible = bottomY - groundY > 0.02;
+  }
+}
+
 function updateGhosts(){
   const heldRecs = new Set(held.values());
   for (const rec of grabbables){
@@ -897,9 +978,10 @@ function updateGhosts(){
     const ghost = ensureGhost(rec);
     rec.node.getWorldPosition(tmpV);
     rec.node.getWorldQuaternion(tmpQ);
-    const d = tmpV.distanceTo(rec.homeWorldPos);
-    const a = 2 * Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
-    ghost.visible = d < rec.snapDist && a < SNAP_ANG;
+    // snap zone is distance-only (orientation doesn't matter - snapping
+    // restores the home orientation anyway)
+    const d = tmpV.distanceTo(homeWorldPosOf(rec, tmpV2));
+    ghost.visible = d < rec.snapDist;
 
     // sample the node's own world transform (not the holder's) every frame
     // so throw velocity captures the mouse-wheel push/pull too, then trim to
@@ -1019,13 +1101,52 @@ function teleportTo(point){
   st.velY = 0;
 }
 
+// which holder (camera or a VR grip) is holding this object or an ancestor
+// of it, or null if it's free
+function holderOf(obj){
+  for (const [holder, rec] of held){
+    let p = obj;
+    while (p){ if (p === rec.node) return holder; p = p.parent; }
+  }
+  return null;
+}
+
+// a composite is assembled when every component sits at its home slot
+// inside it (distance only - orientation is restored by assembly anyway)
+function isAssembled(comp){
+  return comp.components.every(c =>
+    c.node.parent === comp.node && c.node.position.distanceTo(c.home.pos) < 0.01);
+}
+
 function grabWith(holder, raycaster){
   if (held.get(holder)) return releaseHeld(holder);
   raycaster.far = 4.5;
-  const h = firstHit(raycaster.intersectObjects(grabMeshes, false));
-  if (!h) return;
-  const rec = h.object.userData.grab;
-  if (isHeld(rec.node)) return;   // other hand has this part
+  const hits = raycaster.intersectObjects(grabMeshes, false);
+  let pick = null;
+  for (const h of hits){
+    if (!h.object.visible) continue;
+    const r = h.object.userData.grab;
+    if (!r) continue;
+    const hb = holderOf(r.node);
+    if (hb === holder) continue;                          // already in this hand
+    if (hb && held.get(hb).node === r.node) continue;     // that exact part is in the other hand
+    // hb set but the held node differs: r is a sub-part of the other hand's
+    // held assembly - allowed, grabbing it pulls it out (two-hand pull-apart)
+    pick = { rec: r, fromOtherHand: !!hb };
+    break;
+  }
+  if (!pick) return;
+  let rec = pick.rec;
+  // aiming at a component of a fully assembled, free composite grabs the
+  // whole composite - unless the composite is in the other hand, in which
+  // case the aim means "pull this half out of it"
+  if (rec.componentOf && isAssembled(rec.componentOf) && !holderOf(rec.componentOf.node)){
+    rec = rec.componentOf;
+  }
+  if (pick.fromOtherHand && pick.rec.componentOf){
+    // don't instantly re-weld the half you just pulled out
+    pick.rec.componentOf.noWeldUntil = performance.now() + WELD_COOLDOWN_MS;
+  }
   holder.attach(rec.node);
   held.set(holder, rec);
   rec.holdHistory = [];
@@ -1045,12 +1166,11 @@ function releaseHeld(holder, announce=true){
   worldRoot ? worldRoot.attach(rec.node) : scene.attach(rec.node);
   held.delete(holder);
   setGlow(rec.node, 0x000000);
-  // proximity snap-back
+  // proximity snap-back - distance only, against the home parent's CURRENT
+  // pose (a lid snaps onto the box wherever the box is right now)
   rec.node.getWorldPosition(tmpV);
-  rec.node.getWorldQuaternion(tmpQ);
-  const d = tmpV.distanceTo(rec.homeWorldPos);
-  const a = 2*Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
-  if (d < rec.snapDist && a < SNAP_ANG){ rec.holdHistory = null; snapHome(rec); return; }
+  const d = tmpV.distanceTo(homeWorldPosOf(rec, tmpV2));
+  if (d < rec.snapDist){ rec.holdHistory = null; snapHome(rec); return; }
 
   // derive throw velocity/angular velocity from how the part actually moved
   // in hand over the last HOLD_HISTORY_MS, instead of a fixed toss - this
@@ -1088,6 +1208,70 @@ function snapHome(rec){
   rec.node.scale.copy(h.scale);
   setGlow(rec.node, 0x000000);
   toast(rec.label + ' reset');
+}
+
+/* ============================== composites (snap-together parts) ============================== */
+// Runs every frame: a held component half welds into its composite when the
+// other component is close enough to its assembled offset - whether that
+// other half is in the second hand or resting on a surface. Distance only;
+// orientation is corrected by the weld itself.
+function updateAssembly(){
+  if (!composites.length) return;
+  const now = performance.now();
+  for (const comp of composites){
+    if (comp.noWeldUntil && now < comp.noWeldUntil) continue;
+    if (isAssembled(comp)) continue;
+    let anchorHolder = null, anchor = null;
+    for (const [holder, rec] of held){
+      if (rec.componentOf === comp){ anchorHolder = holder; anchor = rec; break; }
+    }
+    if (!anchor) continue;
+    // where the composite would sit if the anchor half stayed exactly where
+    // it is: C_world = M(anchor) x inv(homeLocal(anchor))
+    anchor.node.updateWorldMatrix(true, false);
+    const anchorHomeInv = tmpM.compose(anchor.home.pos, anchor.home.quat, anchor.home.scale).invert();
+    const compWorld = new THREE.Matrix4().multiplyMatrices(anchor.node.matrixWorld, anchorHomeInv);
+    let allClose = true;
+    for (const c of comp.components){
+      if (c === anchor) continue;
+      const targetPos = physV1.copy(c.home.pos).applyMatrix4(compWorld);
+      c.node.getWorldPosition(physV2);
+      const thresh = WELD_FRAC * Math.min(c.snapDist, anchor.snapDist);
+      if (physV2.distanceTo(targetPos) > thresh){ allClose = false; break; }
+    }
+    if (allClose) weldComposite(comp, anchor, anchorHolder, compWorld);
+  }
+}
+
+function weldComposite(comp, anchor, anchorHolder, compWorldMatrix){
+  // free every component from hands and in-flight physics
+  for (const c of comp.components){
+    const hb = holderOf(c.node);
+    if (hb && held.get(hb) === c) held.delete(hb);
+    for (let i = dropping.length - 1; i >= 0; i--){
+      if (dropping[i].rec === c) dropping.splice(i, 1);
+    }
+  }
+  // place the composite so the anchor keeps its current pose, then seat
+  // every component at its home slot inside it
+  comp.node.parent.updateWorldMatrix(true, false);
+  const local = new THREE.Matrix4().copy(comp.node.parent.matrixWorld).invert().multiply(compWorldMatrix);
+  local.decompose(comp.node.position, comp.node.quaternion, comp.node.scale);
+  for (const c of comp.components){
+    comp.node.add(c.node);
+    c.node.position.copy(c.home.pos);
+    c.node.quaternion.copy(c.home.quat);
+    c.node.scale.copy(c.home.scale);
+    setGlow(c.node, 0x000000);
+    c.holdHistory = null;
+  }
+  comp.node.updateMatrixWorld(true);
+  // the anchoring hand now holds the assembled composite
+  anchorHolder.attach(comp.node);
+  held.set(anchorHolder, comp);
+  comp.holdHistory = [];
+  setGlow(comp.node, 0x3a2f10);
+  toast('Assembled ' + comp.label);
 }
 
 function resetAll(){
@@ -1744,9 +1928,29 @@ function updateMovement(dt){
 
 /* ============================== hover / hints ============================== */
 const reticle = document.getElementById('reticle');
+// light up the on-screen action buttons whose action is possible right now,
+// and keep the Grab button's label matching its actual effect
+function updateActionButtons(av){
+  for (const [id, on] of [['mInteract',av.interact],['mGrab',av.grab],['mSnap',av.reset],['mEdit',av.edit]]){
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('can', !!on);
+  }
+  const g = document.getElementById('mGrab');
+  if (g){
+    const label = held.get(camera) ? 'Release' : 'Grab';
+    if (g.textContent !== label) g.textContent = label;
+  }
+}
+
 function updateHover(){
   if (renderer.xr.isPresenting){ updateLasers(); setHoverGlow(null); setHint(''); return; }
+  const holding = held.get(camera);
+  // holding something always allows release (Grab btn) and reset
+  const av = { interact:false, grab:!!holding, reset:!!holding, edit:false };
   const r = centerRay();
+  // the editor opens on any aimed part, grabbable or not
+  r.far = 4.5;
+  av.edit = !!firstHit(r.intersectObjects(collidables, false));
   r.far = 4;
   const hi = firstHit(r.intersectObjects(interactMeshes, false));
   if (hi){
@@ -1756,23 +1960,29 @@ function updateHover(){
       reticle.classList.remove('hot'); reticle.classList.add('locked');
       setHint('Locked: ' + it.label);
     } else {
+      av.interact = true;
       reticle.classList.remove('locked'); reticle.classList.add('hot');
       setHint((isTouch?'Interact':'Click') + ': ' +
         (it.kind==='door' ? (it.open?'close ':'open ') : 'toggle ') + it.label);
     }
+    updateActionButtons(av);
     return;
   }
   r.far = 4.5;
   const hg = firstHit(r.intersectObjects(grabMeshes, false));
   if (hg){
+    av.grab = true;
+    av.reset = true;
     reticle.classList.remove('locked'); reticle.classList.add('hot');
     setHoverGlow(hg.object.userData.grab);
     setHint((isTouch?'Grab':'E') + ': grab ' + hg.object.userData.grab.label);
+    updateActionButtons(av);
     return;
   }
   setHoverGlow(null);
   reticle.classList.remove('hot'); reticle.classList.remove('locked');
-  setHint(held.get(camera) ? ((isTouch?'Reset':'E release, R reset') + ' — holding ' + held.get(camera).label) : '');
+  setHint(holding ? ((isTouch?'Reset':'E release, R reset') + ' — holding ' + holding.label) : '');
+  updateActionButtons(av);
 }
 
 function updateTeleportMarker(){
@@ -1800,6 +2010,7 @@ const DROP_ANGULAR_DRAG = 0.08;        // fraction of angular velocity kept afte
 const DROP_FRICTION_TANGENT = 0.6;     // tangential contact velocity kept per resolution pass
 const DROP_SOLVER_ITERATIONS = 3;      // Gauss-Seidel passes per frame so multiple simultaneous contacts settle together
 const DROP_MIN_BOUNCES_TO_SETTLE = 2;  // must have actually bounced twice before settling is even considered
+const DROP_SETTLE_CONTACTS = 3;        // simultaneous resting contacts required to settle, for every shape
 const DROP_CONTACT_EPS = 0.01;         // meters; "touching" tolerance for a contact point
 const DROP_IMPACT_VEL = 0.05;          // m/s; incoming normal speed above which a contact counts as a real bounce
 const DROP_MAX_TIME = 6;               // unconditional backstop for a numerically marginal case that never quite settles
@@ -1937,14 +2148,13 @@ function updateDropping(dt){
     }
     if (bounced) d.bounces++;
 
-    // settle: needs at least 2 real bounces, then enough simultaneous
-    // resting contacts - capped per-part at whatever the shape can actually
-    // achieve (3 for a box, 2 for a cylinder/cone, 1 for a sphere - see
-    // ensureContactGeometry) - or an unconditional time backstop for a
-    // numerically marginal edge-toppling case that never quite decides.
-    // No forced re-orientation on settle, ever - freeze exactly where the
-    // physics stopped, whatever tilt that is.
-    if ((d.bounces >= DROP_MIN_BOUNCES_TO_SETTLE && contactCount >= rec.maxStableContacts) ||
+    // settle: needs at least 2 real bounces, then 3 simultaneous resting
+    // contacts - every mesh is faceted, so even a "sphere" or cylinder can
+    // eventually rest 3 sampled vertices on a surface. The unconditional
+    // time backstop covers a numerically marginal case that never quite
+    // decides. No forced re-orientation on settle, ever - freeze exactly
+    // where the physics stopped, whatever tilt that is.
+    if ((d.bounces >= DROP_MIN_BOUNCES_TO_SETTLE && contactCount >= DROP_SETTLE_CONTACTS) ||
         d.time > DROP_MAX_TIME){
       dropping.splice(i, 1);
       continue;
@@ -1995,8 +2205,14 @@ renderer.setAnimationLoop(() => {
   // drop physics for released parts
   updateDropping(dt);
 
+  // snap-together check for held composite halves
+  updateAssembly();
+
   // home-slot preview while carrying a part close enough to snap
   updateGhosts();
+
+  // depth-cue line from each carried part down to the ground
+  updateDepthLines();
 
   renderer.render(scene, camera);
 });
@@ -2119,6 +2335,56 @@ function buildDemo(keepPlayer=false){
   // pedestal near room center for dropped/small parts to rest on
   addPedestal(root, 0, 0.425, 0);
 
+  // nested assembly on the pedestal: a lidded box with a two-half object
+  // inside, for exercising hierarchy-level edits and multi-level snapping.
+  // Hierarchy: Box_Assembly > (Box_Lid, Box_Body, Object > (Half_A, Half_B))
+  const boxAsm = new THREE.Group();
+  boxAsm.name = 'Box_Assembly';
+  boxAsm.position.set(0, 0.85, 0);   // pedestal top
+
+  const bodyMat = M(0x8a6a45, 0.75, 0.05);
+  const body = new THREE.Group();
+  body.name = 'Box_Body';
+  const panel = (w,h,d,x,y,z) => {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), bodyMat);
+    p.position.set(x,y,z); body.add(p); return p;
+  };
+  // open-top box, outer 0.30 x 0.14 x 0.24, wall 0.015
+  panel(0.30,0.02,0.24,  0,0.01,0);           // bottom
+  panel(0.30,0.12,0.015, 0,0.08, 0.1125);     // front
+  panel(0.30,0.12,0.015, 0,0.08,-0.1125);     // back
+  panel(0.015,0.12,0.21, 0.1425,0.08,0);      // right
+  panel(0.015,0.12,0.21,-0.1425,0.08,0);      // left
+  boxAsm.add(body);
+
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(0.32,0.025,0.26), M(0x6a4e33,0.7,0.05));
+  lid.name = 'Box_Lid';
+  lid.position.set(0, 0.1525, 0);
+  boxAsm.add(lid);
+
+  // two-half object: hemispheres (plus flat caps so the open equator face
+  // isn't see-through) that mate into a sphere. Both halves' origins sit at
+  // the shared sphere center, so "assembled" means their origins coincide -
+  // which makes the snap-together distance check trivial
+  const objectGroup = new THREE.Group();
+  objectGroup.name = 'Object';
+  objectGroup.position.set(0, 0.07, 0);    // centered in the box cavity
+  const mkHalf = (name, color, flip) => {
+    const g = new THREE.Group();
+    g.name = name;
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12, 0, Math.PI), M(color, 0.4, 0.3));
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.05, 16), M(color, 0.4, 0.3));
+    cap.rotation.y = Math.PI;   // face the flat side outward from the dome half
+    g.add(dome); g.add(cap);
+    if (flip) g.rotation.y = Math.PI;
+    objectGroup.add(g);
+    return g;
+  };
+  const halfA = mkHalf('Half_A', 0xc0504d, false);
+  const halfB = mkHalf('Half_B', 0x4d9ec0, true);
+  boxAsm.add(objectGroup);
+  root.add(boxAsm);
+
   // workbench with grabbable parts
   mk(1.8,0.08,0.9, 1.8,0.85,-1.6, M(0x4a3c2c,0.85,0), root);
   mk(0.08,0.85,0.08, 1.0,0.42,-1.3, M(0x33291d), root);
@@ -2126,9 +2392,13 @@ function buildDemo(keepPlayer=false){
   mk(0.08,0.85,0.08, 1.0,0.42,-1.9, M(0x33291d), root);
   mk(0.08,0.85,0.08, 2.6,0.42,-1.9, M(0x33291d), root);
 
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14,0.05,10,24), M(0x9aa4b2,0.3,0.85));
-  ring.name = 'Ring_A'; ring.rotation.x = Math.PI/2;
-  ring.position.set(1.35,0.95,-1.6); root.add(ring);
+  const pyramid = new THREE.Mesh(new THREE.TetrahedronGeometry(0.12), M(0x9aa4b2,0.3,0.85));
+  pyramid.name = 'Pyramid_A';
+  // orient a face flat down: the face opposite vertex (1,1,1) has outward
+  // normal -(1,1,1)/sqrt(3), so rotating (1,1,1) up puts that face on the bench
+  pyramid.quaternion.setFromUnitVectors(new THREE.Vector3(1,1,1).normalize(), new THREE.Vector3(0,1,0));
+  // face-to-center distance of a tetrahedron is circumradius/3 = 0.04
+  pyramid.position.set(1.35,0.93,-1.6); root.add(pyramid);
 
   const block = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.1,0.14), M(0xd0642e,0.5,0.3));
   block.name = 'Block_B';
@@ -2142,11 +2412,24 @@ function buildDemo(keepPlayer=false){
   buildWorld(root, 'demo room', keepPlayer);
   // the demo showcases grabbing, so mark its bench parts grabbable directly
   // rather than relying on a manual per-part toggle
-  registerGrabbable(ring);
+  registerGrabbable(pyramid);
   registerGrabbable(block);
   registerGrabbable(spool);
+  // assembly registration ORDER matters: markMeshes gives each mesh a
+  // back-pointer to its rec and the LAST registration wins, so parents come
+  // first and the most specific parts last. Box_Body is deliberately not
+  // registered - grabbing the body grabs the whole assembly
+  const asmRec = registerGrabbable(boxAsm);
+  const objRec = registerGrabbable(objectGroup);
+  const halfARec = registerGrabbable(halfA);
+  const halfBRec = registerGrabbable(halfB);
+  registerGrabbable(lid);
+  objRec.components = [halfARec, halfBRec];
+  halfARec.componentOf = objRec;
+  halfBRec.componentOf = objRec;
+  composites.push(objRec);
   updateStats();
-  if (!keepPlayer) toast('Demo: door, gate, button, lever, pedestal, 3 parts on the bench');
+  if (!keepPlayer) toast('Demo: door, gate, button, lever, box assembly on the pedestal, 3 parts on the bench');
 }
 
 toast('Load a .glb, or open the demo room');

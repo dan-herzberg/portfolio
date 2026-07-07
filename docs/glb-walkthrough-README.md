@@ -37,15 +37,31 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 **Teleport mode** shows a ring on the floor wherever you're currently aiming, so you can see exactly where you'll land before you click/trigger.
 
+**Button availability:** on touch devices, the on-screen Interact / Grab / Reset / Edit buttons light up when aiming at something that action currently applies to, and the Grab button reads **Release** while you're holding a part.
+
+**Light/dark environment:** the **Light mode / Dark mode** button in the Scene panel swaps the surrounding environment (sky, fog, ground plane, lighting intensity) between a dark studio look and a bright one. Loaded models keep their own materials either way.
+
 ## Grabbing parts
 
 Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones.
 
-Carrying a part tracks its actual recent motion (from the mouse, the wheel push/pull, or a VR controller), so throwing it imparts real momentum in the direction you were moving it — this glide decays quickly rather than sailing across the room, while the fall itself is driven by ordinary, uniform gravity. On impact the part rotates about its own center of mass and tumbles realistically from one contact to the next (an off-center hit spins it, a flat landing doesn't), rather than following a canned bounce-and-decay curve. It settles once it's bounced at least twice and has enough points simultaneously resting on the floor or another object to be geometrically stable — three for a box-like part, fewer if the shape can't achieve that (two for a cylinder or cone, one for a sphere) — and then freezes exactly where it stopped, with no forced re-orientation to any prescribed pose, home or otherwise.
+Carrying a part tracks its actual recent motion (from the mouse, the wheel push/pull, or a VR controller), so throwing it imparts real momentum in the direction you were moving it — this glide decays quickly rather than sailing across the room, while the fall itself is driven by ordinary, uniform gravity. On impact the part rotates about its own center of mass and tumbles realistically from one contact to the next (an off-center hit spins it, a flat landing doesn't), rather than following a canned bounce-and-decay curve. It settles once it's bounced at least twice and has three points simultaneously resting on the floor or another object — every mesh is faceted, so even a sphere or cylinder eventually gets three vertices down — and then freezes exactly where it stopped, with no forced re-orientation to any prescribed pose, home or otherwise.
+
+While carrying a part, a thin vertical line drops from the part to whatever is below it, as a depth cue — judging carry height is otherwise hard, especially in VR. Returning a part home is distance-based only: get it within one bounding-box diagonal of its home spot and release, and it snaps back regardless of how it's rotated.
 
 While carrying a part, a translucent ghost of it appears at its home slot as soon as you're close enough (position and angle) that releasing would snap it back — a preview of where it's about to land.
 
 Small real `.glb` loads (longest dimension under 24 in) get a pedestal placed next to them automatically, for a part with nothing else nearby to rest on. Large models skip it. The demo room has its own pedestal regardless of this, since it's built around showcasing small parts.
+
+## The demo box assembly (snap-together parts)
+
+The demo pedestal carries a nested assembly for exercising multi-level grabbing and snapping: a lidded box (`Box_Assembly` → `Box_Lid`, `Box_Body`) containing a two-half `Object` (`Half_A` + `Half_B`, red and blue hemispheres that mate into a sphere).
+
+- **Grab the lid** to open the box; release it near the box and it snaps back on — wherever the box currently is, including in your other hand.
+- **Grab the assembled Object** (aim at either half while it's whole) to take it out; grabbing the box body grabs the entire assembly.
+- **Pull it apart** (VR): while holding the Object in one hand, grab a half with the other controller to detach it.
+- **Snap it together**: bring one half close to the other — whether the other half is in your second hand or resting on a surface — and they weld back into one Object, which ends up in the hand that made the move. Distance is all that matters; orientation corrects itself on the snap.
+- The connected Object snaps home into the box, the lid onto the box, and the box assembly onto the pedestal, each within one bounding-box diagonal of its home spot.
 
 ## Locked doors
 
@@ -63,7 +79,9 @@ Two more Scene-panel tools:
 
 ## Grab and reset
 
-Grab any registered part, carry it, release it. Release within one bounding-box diagonal of its original position (so bigger parts get a proportionally bigger snap zone) and ~30° of its original pose and it returns home automatically. **R** (or the Reset button) forces this for the currently aimed/held part. **Reset scene** restores every part, closes every door, turns every switch off, and puts you back at your spawn point.
+Grab any registered part, carry it, release it. Release within one bounding-box diagonal of its original position (so bigger parts get a proportionally bigger snap zone) and it returns home automatically — distance only, orientation doesn't matter. **R** (or the Reset button) forces this for the currently aimed/held part. **Reset scene** restores every part, closes every door, turns every switch off, and puts you back at your spawn point.
+
+For nested parts, the home target follows the parent: a lid snaps onto its box wherever the box currently is, even if the box is in your other hand.
 
 ## In-situ editing (T key / Edit button)
 
@@ -83,7 +101,7 @@ Overrides file format:
 {
   "roles": {
     "Assembly1/Panel_3": { "role": "door", "hinge": "right" },
-    "Ring_A": { "role": "grabbable" }
+    "Pyramid_A": { "role": "grabbable" }
   },
   "settings": { "walkSpeed": 3.6, "flySpeed": 6.5 }
 }
