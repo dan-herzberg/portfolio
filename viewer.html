@@ -359,11 +359,33 @@ const tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
 const UP = new THREE.Vector3(0,1,0);
 const ray = new THREE.Raycaster();
 
+// scratch for rigid-body drop physics — kept separate from tmpV/tmpV2/tmpQ above
+// so a multi-contact resolution pass never clobbers a value another routine
+// (updateGhosts, hover, etc) is mid-way through using in the same frame
+const physV1 = new THREE.Vector3(), physV2 = new THREE.Vector3(),
+      physV3 = new THREE.Vector3(), physV4 = new THREE.Vector3();
+const physQ1 = new THREE.Quaternion();
+
+// 26 unit directions (6 face + 8 corner + 12 edge of a cube) used to sample
+// each grabbable part's support points for contact detection - see
+// ensureContactGeometry()
+const CONTACT_DIRS = (() => {
+  const dirs = [];
+  for (const x of [-1,0,1]) for (const y of [-1,0,1]) for (const z of [-1,0,1]){
+    if (x===0 && y===0 && z===0) continue;
+    dirs.push(new THREE.Vector3(x,y,z).normalize());
+  }
+  return dirs;
+})();
+
 const DOOR_RE = /door|gate|hatch|portal/i;
 const SWITCH_RE = /switch|button|btn|lever|toggle/i;
 const SNAP_ANG = 0.5;   // radians; snap distance is per-part, see registerGrabbable()
 let walkSpeed = 3.6, flySpeed = 6.5;
-const dropping = [];           // {node, vel:Vector3, angVel:Vector3, bounces:0, settled:false}
+const dropping = [];           // {rec, vel:Vector3, angVel:Vector3, bounces:0, time:0}
+const HOLD_HISTORY_MS = 150;   // window used to derive throw velocity from recent hold motion
+const MAX_THROW_SPEED = 8;     // m/s cap on release velocity derived from hold history
+const MAX_THROW_ANGSPEED = 20; // rad/s cap on release angular velocity
 let overrides = { roles:{}, settings:{} };   // roles: path -> {role, hinge}
 let lastSource = null;                       // {kind:'glb', buffer, label} | {kind:'demo'}
 let loadedRoot = null;
@@ -745,6 +767,90 @@ function registerGrabbable(node){
   markMeshes(node, 'grab', rec, grabMeshes);
 }
 
+const CONTACT_MAX_PTS_PER_MESH = 4000; // stride-sample vertex buffers above this size
+const CONTACT_TIE_EPS = 0.004;         // meters; how close two vertices' projections must be to "tie" for a sample direction
+const CONTACT_CLUSTER_EPS = 0.01;      // meters; merge candidate points closer than this across directions
+const CONTACT_MAX_POINTS = 40;         // hard cap on total cached contact points per part
+
+// Computes and caches, once per part (lazily, on first drop - mirrors
+// ensureGhost's cache-on-rec pattern), the rigid-body properties
+// updateDropping() needs: an approximate center of mass, a diagonal
+// inverse-inertia tensor (solid box of the part's own bounds, unit mass,
+// uniform density - no need for true CAD mass properties here), and a small
+// set of local-space "contact candidate" points used for ground/object
+// contact each physics frame instead of the full mesh.
+//
+// Contact points come from direction-sampled support points rather than a
+// true convex hull: for each of 26 fixed directions (CONTACT_DIRS), find the
+// mesh vertex (vertices, if tied) with the max dot product against that
+// direction. A true hull throws on the near-planar point sets that thin CAD
+// parts (washers, brackets, sheet metal) commonly produce; this never does,
+// costs O(directions x vertices), and gives the same emergent per-shape
+// contact-count behavior: a box ties ~4 vertices per face, a coarse
+// cylinder/cone resting on its side only ever ties ~2 rim vertices, a
+// sphere never ties more than 1 - so maxStableContacts (the largest tie
+// seen across all directions, capped at 3) falls out of the geometry
+// itself rather than needing a per-shape-type special case.
+function ensureContactGeometry(rec){
+  if (rec.contactPts) return;
+  const node = rec.node;
+  node.updateMatrixWorld(true);
+  const invRoot = new THREE.Matrix4().copy(node.matrixWorld).invert();
+
+  const localVerts = [];
+  const toLocal = new THREE.Matrix4();
+  node.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    const posAttr = o.geometry.attributes.position;
+    if (!posAttr) return;
+    toLocal.multiplyMatrices(invRoot, o.matrixWorld);
+    const stride = Math.max(1, Math.floor(posAttr.count / CONTACT_MAX_PTS_PER_MESH));
+    for (let i = 0; i < posAttr.count; i += stride){
+      localVerts.push(new THREE.Vector3().fromBufferAttribute(posAttr, i).applyMatrix4(toLocal));
+    }
+  });
+
+  const localBox = new THREE.Box3();
+  if (localVerts.length) localBox.setFromPoints(localVerts);
+  const size = localBox.isEmpty() ? new THREE.Vector3(0.1,0.1,0.1) : localBox.getSize(new THREE.Vector3());
+  rec.comLocal = localBox.isEmpty() ? new THREE.Vector3() : localBox.getCenter(new THREE.Vector3());
+
+  // diagonal inverse-inertia tensor for a solid box of these dimensions
+  const ix = (size.y*size.y + size.z*size.z) / 12;
+  const iy = (size.x*size.x + size.z*size.z) / 12;
+  const iz = (size.x*size.x + size.y*size.y) / 12;
+  rec.invInertiaLocal = new THREE.Vector3(
+    ix > 1e-9 ? 1/ix : 0, iy > 1e-9 ? 1/iy : 0, iz > 1e-9 ? 1/iz : 0
+  );
+
+  const pts = [];
+  let maxTie = 1;
+  outer:
+  for (const dir of CONTACT_DIRS){
+    let best = -Infinity;
+    for (const p of localVerts){ const d = p.dot(dir); if (d > best) best = d; }
+    const tied = localVerts.filter(p => best - p.dot(dir) < CONTACT_TIE_EPS);
+    if (tied.length > maxTie) maxTie = tied.length;
+    for (const p of tied){
+      if (!pts.some(q => q.distanceTo(p) < CONTACT_CLUSTER_EPS)) pts.push(p.clone());
+      if (pts.length >= CONTACT_MAX_POINTS) break outer;
+    }
+  }
+  if (!pts.length && !localBox.isEmpty()){
+    // fallback for a part with no readable vertex data: bounding-box corners
+    for (let x=0;x<2;x++) for (let y=0;y<2;y++) for (let z=0;z<2;z++){
+      pts.push(new THREE.Vector3(
+        x ? localBox.max.x : localBox.min.x,
+        y ? localBox.max.y : localBox.min.y,
+        z ? localBox.max.z : localBox.min.z
+      ));
+    }
+    maxTie = 4;
+  }
+  rec.contactPts = pts;
+  rec.maxStableContacts = Math.min(3, maxTie);
+}
+
 // A translucent box outline at the part's home slot, shown while carrying it
 // close enough to snap. Deliberately NOT a full clone of the part's mesh -
 // cloning a geometry-heavy grabbed part on every grab was expensive enough
@@ -794,6 +900,13 @@ function updateGhosts(){
     const d = tmpV.distanceTo(rec.homeWorldPos);
     const a = 2 * Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
     ghost.visible = d < rec.snapDist && a < SNAP_ANG;
+
+    // sample the node's own world transform (not the holder's) every frame
+    // so throw velocity captures the mouse-wheel push/pull too, then trim to
+    // a short rolling window - this is what releaseHeld() derives momentum from
+    const hist = rec.holdHistory;
+    hist.push({ t: performance.now(), pos: tmpV.clone(), quat: tmpQ.clone() });
+    while (hist.length > 1 && hist[hist.length-1].t - hist[0].t > HOLD_HISTORY_MS) hist.shift();
   }
 }
 
@@ -915,6 +1028,7 @@ function grabWith(holder, raycaster){
   if (isHeld(rec.node)) return;   // other hand has this part
   holder.attach(rec.node);
   held.set(holder, rec);
+  rec.holdHistory = [];
   setGlow(rec.node, 0x3a2f10);
   toast('Grabbed ' + rec.label);
 }
@@ -936,19 +1050,33 @@ function releaseHeld(holder, announce=true){
   rec.node.getWorldQuaternion(tmpQ);
   const d = tmpV.distanceTo(rec.homeWorldPos);
   const a = 2*Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
-  if (d < rec.snapDist && a < SNAP_ANG){ snapHome(rec); return; }
-  // start drop physics — small downward + forward toss
-  const vel = new THREE.Vector3(0, -0.3, 0);
-  // add a bit of the player's look direction as throw impulse
-  camera.getWorldDirection(tmpV2);
-  vel.x += tmpV2.x * 0.4;
-  vel.z += tmpV2.z * 0.4;
-  const angVel = new THREE.Vector3(
-    (Math.random()-0.5)*2.5,
-    (Math.random()-0.5)*1.5,
-    (Math.random()-0.5)*2.5
-  );
-  dropping.push({ node: rec.node, vel, angVel, bounces:0, time:0 });
+  if (d < rec.snapDist && a < SNAP_ANG){ rec.holdHistory = null; snapHome(rec); return; }
+
+  // derive throw velocity/angular velocity from how the part actually moved
+  // in hand over the last HOLD_HISTORY_MS, instead of a fixed toss - this
+  // covers mouse (including the wheel push/pull) and VR controllers
+  // identically, since both just sample the node's own world transform
+  const hist = rec.holdHistory || [];
+  const vel = new THREE.Vector3(), angVel = new THREE.Vector3();
+  if (hist.length >= 2){
+    const first = hist[0], last = hist[hist.length-1];
+    const dtWin = Math.max((last.t - first.t) / 1000, 1e-4);
+    vel.subVectors(last.pos, first.pos).divideScalar(dtWin);
+    const dq = last.quat.clone().multiply(first.quat.clone().invert());
+    if (dq.w < 0) dq.set(-dq.x, -dq.y, -dq.z, -dq.w);   // shortest-path rotation
+    const angle = 2 * Math.acos(THREE.MathUtils.clamp(dq.w, -1, 1));
+    const axis = new THREE.Vector3(dq.x, dq.y, dq.z);
+    if (axis.lengthSq() > 1e-8) axis.normalize(); else axis.set(0,1,0);
+    angVel.copy(axis).multiplyScalar(angle / dtWin);
+  }
+  // guard against a single degenerate sample (e.g. a VR snap-turn) producing
+  // an absurd throw
+  if (vel.length() > MAX_THROW_SPEED) vel.setLength(MAX_THROW_SPEED);
+  if (angVel.length() > MAX_THROW_ANGSPEED) angVel.setLength(MAX_THROW_ANGSPEED);
+  rec.holdHistory = null;
+
+  ensureContactGeometry(rec);
+  dropping.push({ rec, vel, angVel, bounces:0, time:0 });
   if (announce) toast('Dropped ' + rec.label);
 }
 
@@ -1665,33 +1793,65 @@ function updateTeleportMarker(){
 }
 
 /* ============================== drop physics ============================== */
-const DROP_GRAVITY = 9.8;
-const DROP_BOUNCE = 0.22;      // restitution coefficient - low, so it settles fast rather than bouncing around
-const DROP_FRICTION = 0.55;    // horizontal velocity kept per bounce
-const DROP_ANG_DAMP = 0.5;     // angular velocity damped per bounce
-const DROP_SETTLE_VEL = 0.15;  // speed below which we consider it settled
-const DROP_MAX_BOUNCES = 3;    // force-settle after this many bounces regardless of speed
-const DROP_MAX_TIME = 4;       // max seconds before force-settling
+const DROP_GRAVITY = 9.8;              // uniform - applied identically to every dropping part
+const DROP_RESTITUTION = 0.22;         // per-contact bounce coefficient
+const DROP_LINEAR_DRAG = 0.05;         // fraction of horizontal velocity kept after 1s of drag (vertical is undamped, gravity-only)
+const DROP_ANGULAR_DRAG = 0.08;        // fraction of angular velocity kept after 1s of drag
+const DROP_FRICTION_TANGENT = 0.6;     // tangential contact velocity kept per resolution pass
+const DROP_SOLVER_ITERATIONS = 3;      // Gauss-Seidel passes per frame so multiple simultaneous contacts settle together
+const DROP_MIN_BOUNCES_TO_SETTLE = 2;  // must have actually bounced twice before settling is even considered
+const DROP_CONTACT_EPS = 0.01;         // meters; "touching" tolerance for a contact point
+const DROP_IMPACT_VEL = 0.05;          // m/s; incoming normal speed above which a contact counts as a real bounce
+const DROP_MAX_TIME = 6;               // unconditional backstop for a numerically marginal case that never quite settles
+const DROP_BROADPHASE_MARGIN = 0.15;   // meters; skip the per-contact-point narrow phase while this far above the ground
+
+// Integrates one physics step: translates by vel*dt, then rotates about the
+// part's own world-space center of mass (not its local origin - CAD-exported
+// GLBs routinely have their node origin at a corner/mount-point, and naively
+// rotating about that would visibly orbit around the wrong point instead of
+// tumbling naturally).
+function integrateRigidBody(node, comLocal, vel, angVel, dt){
+  const comWorld = physV1.copy(comLocal).applyMatrix4(node.matrixWorld);
+  const offset = node.getWorldPosition(physV2).sub(comWorld);
+  comWorld.addScaledVector(vel, dt);
+  const angle = angVel.length() * dt;
+  if (angle > 1e-9){
+    physQ1.setFromAxisAngle(physV3.copy(angVel).normalize(), angle);
+    offset.applyQuaternion(physQ1);
+    node.quaternion.premultiply(physQ1);
+  }
+  const newWorldPos = comWorld.add(offset);
+  node.position.copy(node.parent.worldToLocal(newWorldPos));
+  node.updateMatrixWorld(true);
+}
 
 function updateDropping(dt){
   for (let i = dropping.length - 1; i >= 0; i--){
     const d = dropping[i];
+    const rec = d.rec, node = rec.node;
     d.time += dt;
 
-    // gravity
+    // continuous drag on horizontal linear + all angular velocity, so a
+    // throw's glide dies out quickly. Vertical velocity is left alone,
+    // driven by gravity only - falls still read as real gravity, and every
+    // part is affected identically (no per-part scaling anywhere)
+    const linDrag = Math.pow(DROP_LINEAR_DRAG, dt);
+    d.vel.x *= linDrag; d.vel.z *= linDrag;
+    d.angVel.multiplyScalar(Math.pow(DROP_ANGULAR_DRAG, dt));
+
     d.vel.y -= DROP_GRAVITY * dt;
 
-    // horizontal wall collision — without this, a fast horizontal toss can
-    // pass straight through a thin wall in one frame, since only vertical
-    // ground collision is checked below
+    // horizontal wall collision — unchanged: without this, a fast
+    // horizontal toss can pass straight through a thin wall in one frame,
+    // since only vertical ground collision is checked below
     const stepX = d.vel.x * dt, stepZ = d.vel.z * dt;
     const horizLen = Math.hypot(stepX, stepZ);
     if (horizLen > 1e-6){
-      d.node.getWorldPosition(tmpV2);
+      node.getWorldPosition(tmpV2);
       ray.ray.origin.copy(tmpV2);
       ray.ray.direction.set(stepX / horizLen, 0, stepZ / horizLen);
       ray.far = horizLen + 0.05;
-      const wallTargets = collidables.filter(o => !isDescendantOf(o, d.node));
+      const wallTargets = collidables.filter(o => !isDescendantOf(o, node));
       const wallHit = firstHit(ray.intersectObjects(wallTargets, false));
       if (wallHit && wallHit.face){
         const n = wallHit.face.normal.clone().transformDirection(wallHit.object.matrixWorld);
@@ -1701,60 +1861,100 @@ function updateDropping(dt){
       }
     }
 
-    // integrate position (world-space, but node is child of worldRoot)
-    d.node.position.x += d.vel.x * dt;
-    d.node.position.y += d.vel.y * dt;
-    d.node.position.z += d.vel.z * dt;
+    integrateRigidBody(node, rec.comLocal, d.vel, d.angVel, dt);
 
-    // tumble rotation
-    d.node.rotation.x += d.angVel.x * dt;
-    d.node.rotation.y += d.angVel.y * dt;
-    d.node.rotation.z += d.angVel.z * dt;
-
-    // find ground below the part (use world position)
-    d.node.getWorldPosition(tmpV);
-    const box = new THREE.Box3().setFromObject(d.node);
+    // broad phase — skip the expensive per-contact-point narrow phase
+    // entirely while still clearly airborne
+    node.getWorldPosition(tmpV);
+    const box = new THREE.Box3().setFromObject(node);
     const bottomY = box.min.y;
-
-    // floor collision — find actual ground height (excluding the falling
-    // part's own meshes, which are in `collidables` too and would otherwise
-    // self-intersect the downward ray). Start just above the part's own
-    // current bottom, not high above its center - starting far above would
-    // hit a ceiling or overhead beam first in an enclosed room and report
-    // that as "ground" instead of the real floor below.
     ray.ray.origin.set(tmpV.x, bottomY + 0.1, tmpV.z);
     ray.ray.direction.set(0, -1, 0);
     ray.far = 10;
-    const groundTargets = collidables.filter(o => !isDescendantOf(o, d.node));
-    const hit = firstHit(ray.intersectObjects(groundTargets, false));
-    const groundY = hit ? hit.point.y : 0;
-
-    // how far below ground is the bottom of the part?
-    if (bottomY <= groundY && d.vel.y < 0){
-      // push part up so bottom sits at ground level
-      const penetration = groundY - bottomY;
-      d.node.position.y += penetration;
-
-      // bounce
-      d.vel.y = -d.vel.y * DROP_BOUNCE;
-      d.vel.x *= DROP_FRICTION;
-      d.vel.z *= DROP_FRICTION;
-      d.angVel.multiplyScalar(DROP_ANG_DAMP);
-      d.bounces++;
-
-      // settled: stop right here, whatever tilt the tumble physics left it
-      // at - no forced re-orientation to any prescribed pose, home or
-      // otherwise. Natural, if occasionally imperfect, beats obviously
-      // scripted-looking self-righting.
-      const speed = Math.hypot(d.vel.x, d.vel.y, d.vel.z);
-      if (speed < DROP_SETTLE_VEL || d.bounces >= DROP_MAX_BOUNCES || d.time > DROP_MAX_TIME){
-        dropping.splice(i, 1);
-        continue;
-      }
+    const groundTargets = collidables.filter(o => !isDescendantOf(o, node));
+    const roughHit = firstHit(ray.intersectObjects(groundTargets, false));
+    const roughGroundY = roughHit ? roughHit.point.y : 0;
+    if (bottomY - roughGroundY > DROP_BROADPHASE_MARGIN){
+      if (d.time > DROP_MAX_TIME) dropping.splice(i, 1);
+      continue;
     }
 
-    // timeout safety
-    if (d.time > DROP_MAX_TIME){
+    // narrow phase — resolve each cached contact candidate point (see
+    // ensureContactGeometry) against whatever's directly below it, as a
+    // proper rigid-vs-static single-point impulse (using the real hit face
+    // normal, not an assumed straight-up one, so mildly sloped surfaces
+    // still respond correctly). A few Gauss-Seidel passes let multiple
+    // simultaneous contacts (e.g. two legs of a bracket) settle together
+    // instead of fighting each other.
+    let bounced = false;
+    let contactCount = 0;
+    for (let iter = 0; iter < DROP_SOLVER_ITERATIONS; iter++){
+      contactCount = 0;
+      let maxPenetration = 0;
+      const comWorld = physV2.copy(rec.comLocal).applyMatrix4(node.matrixWorld);
+      const invQ = tmpQ.copy(node.quaternion).invert();
+      for (const localPt of rec.contactPts){
+        const worldPt = physV1.copy(localPt).applyMatrix4(node.matrixWorld);
+        ray.ray.origin.set(worldPt.x, worldPt.y + 0.2, worldPt.z);
+        ray.ray.direction.set(0, -1, 0);
+        ray.far = 0.2 + DROP_CONTACT_EPS + 0.5;
+        const hit = firstHit(ray.intersectObjects(groundTargets, false));
+        if (!hit) continue;
+        const penetration = hit.point.y - worldPt.y;   // >0 means at/below the surface
+        if (penetration < -DROP_CONTACT_EPS) continue; // still above it, not touching
+        contactCount++;
+        if (penetration > maxPenetration) maxPenetration = penetration;
+
+        const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : UP;
+        const r = physV3.copy(worldPt).sub(comWorld);
+        const vPoint = physV4.copy(d.angVel).cross(r).add(d.vel);
+        const vn = vPoint.dot(normal);
+        if (vn < 0){
+          if (-vn > DROP_IMPACT_VEL) bounced = true;
+          // single-body-vs-static contact impulse, unit mass, diagonal
+          // body-frame inverse-inertia tensor rotated into world space
+          const rxn = new THREE.Vector3().crossVectors(r, normal);
+          const rxnLocal = rxn.clone().applyQuaternion(invQ);
+          const iInvRxnWorld = new THREE.Vector3(
+            rxnLocal.x * rec.invInertiaLocal.x,
+            rxnLocal.y * rec.invInertiaLocal.y,
+            rxnLocal.z * rec.invInertiaLocal.z
+          ).applyQuaternion(node.quaternion);
+          const denom = 1 + iInvRxnWorld.dot(rxn);
+          const j = -(1 + DROP_RESTITUTION) * vn / denom;
+          d.vel.addScaledVector(normal, j);
+          d.angVel.addScaledVector(iInvRxnWorld, j);
+
+          // tangential friction (simplified Coulomb approximation)
+          const vt = vPoint.clone().sub(normal.clone().multiplyScalar(vn));
+          d.vel.addScaledVector(vt, -(1 - DROP_FRICTION_TANGENT));
+        }
+      }
+      if (maxPenetration > 0){
+        node.position.y += maxPenetration;
+        node.updateMatrixWorld(true);
+      }
+    }
+    if (bounced) d.bounces++;
+
+    // settle: needs at least 2 real bounces, then enough simultaneous
+    // resting contacts - capped per-part at whatever the shape can actually
+    // achieve (3 for a box, 2 for a cylinder/cone, 1 for a sphere - see
+    // ensureContactGeometry) - or an unconditional time backstop for a
+    // numerically marginal edge-toppling case that never quite decides.
+    // No forced re-orientation on settle, ever - freeze exactly where the
+    // physics stopped, whatever tilt that is.
+    if ((d.bounces >= DROP_MIN_BOUNCES_TO_SETTLE && contactCount >= rec.maxStableContacts) ||
+        d.time > DROP_MAX_TIME){
+      dropping.splice(i, 1);
+      continue;
+    }
+
+    // numerical-instability safety net - can't be exercised live before
+    // shipping, so guard defensively rather than let a NaN/Infinity freeze
+    // the render loop
+    if (!isFinite(d.vel.x) || !isFinite(d.vel.y) || !isFinite(d.vel.z) ||
+        !isFinite(d.angVel.x) || !isFinite(d.angVel.y) || !isFinite(d.angVel.z)){
       dropping.splice(i, 1);
     }
   }
@@ -1926,25 +2126,25 @@ function buildDemo(keepPlayer=false){
   mk(0.08,0.85,0.08, 1.0,0.42,-1.9, M(0x33291d), root);
   mk(0.08,0.85,0.08, 2.6,0.42,-1.9, M(0x33291d), root);
 
-  const gear = new THREE.Mesh(new THREE.TorusGeometry(0.14,0.05,10,24), M(0x9aa4b2,0.3,0.85));
-  gear.name = 'Gear_A'; gear.rotation.x = Math.PI/2;
-  gear.position.set(1.35,0.95,-1.6); root.add(gear);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14,0.05,10,24), M(0x9aa4b2,0.3,0.85));
+  ring.name = 'Ring_A'; ring.rotation.x = Math.PI/2;
+  ring.position.set(1.35,0.95,-1.6); root.add(ring);
 
-  const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.1,0.14), M(0xd0642e,0.5,0.3));
-  bracket.name = 'Bracket_B';
-  bracket.position.set(1.85,0.95,-1.5); root.add(bracket);
+  const block = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.1,0.14), M(0xd0642e,0.5,0.3));
+  block.name = 'Block_B';
+  block.position.set(1.85,0.95,-1.5); root.add(block);
 
-  const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.24,20), M(0x4f86c6,0.45,0.5));
-  housing.name = 'Housing_C';
-  housing.position.set(2.35,1.01,-1.7); root.add(housing);
+  const spool = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.24,20), M(0x4f86c6,0.45,0.5));
+  spool.name = 'Spool_C';
+  spool.position.set(2.35,1.01,-1.7); root.add(spool);
 
   lastSource = { kind:'demo' };
   buildWorld(root, 'demo room', keepPlayer);
   // the demo showcases grabbing, so mark its bench parts grabbable directly
   // rather than relying on a manual per-part toggle
-  registerGrabbable(gear);
-  registerGrabbable(bracket);
-  registerGrabbable(housing);
+  registerGrabbable(ring);
+  registerGrabbable(block);
+  registerGrabbable(spool);
   updateStats();
   if (!keepPlayer) toast('Demo: door, gate, button, lever, pedestal, 3 parts on the bench');
 }
