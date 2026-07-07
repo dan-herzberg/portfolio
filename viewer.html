@@ -30,10 +30,12 @@
   input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;
     background:var(--accent);cursor:pointer;}
   .row.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
-  .row.grid3 button, .row.grid3 .dropdown{width:100%;}
-  .row.grid3 button{padding:8px 4px;font-size:12px;}
-  .dropdown{position:relative;}
-  .dropdown-menu{position:absolute;top:100%;left:0;margin-top:4px;display:none;flex-direction:column;
+  .row.grid3 button{width:100%;padding:8px 4px;font-size:12px;}
+  /* position:fixed + JS-computed coordinates (not absolute inside .dropdown):
+     .panel's backdrop-filter creates a stacking context, which would trap an
+     absolutely-positioned menu inside the Scene panel's paint order, behind
+     the Movement panel below it. Living at the body level avoids that. */
+  .dropdown-menu{position:fixed;display:none;flex-direction:column;
     gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;
     z-index:15;min-width:160px;backdrop-filter:blur(6px);}
   .dropdown-menu.open{display:flex;}
@@ -99,13 +101,7 @@
   <div class="panel">
     <div class="label">Scene</div>
     <div class="row grid3">
-      <div class="dropdown">
-        <button id="btnLoad">Load &#9662;</button>
-        <div class="dropdown-menu" id="loadMenu">
-          <button id="btnLoadFile">Load .glb file</button>
-          <button id="btnDemo">Load Demo Room</button>
-        </div>
-      </div>
+      <button id="btnLoad">Load &#9662;</button>
       <button id="btnReset">Reset scene</button>
       <button id="btnExit">Exit</button>
     </div>
@@ -133,7 +129,7 @@
   </div>
   <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded</div>
   <div class="panel">
-    <div class="label">Simplify (reduce tris)</div>
+    <div class="label">Simplify (hide smallest parts)</div>
     <div class="row" style="align-items:center;">
       <input type="range" id="simplifySlider" min="0" max="10" step="1" value="0" style="flex:1;min-width:80px;">
       <span class="mono" id="simplifyPct" style="font-size:11px;color:var(--dim);min-width:34px;text-align:right;">0%</span>
@@ -142,6 +138,11 @@
       <button id="btnSimplify">Apply</button>
     </div>
   </div>
+</div>
+
+<div class="dropdown-menu" id="loadMenu">
+  <button id="btnLoadFile">Load .glb file</button>
+  <button id="btnDemo">Load Demo Room</button>
 </div>
 
 <div id="help" class="panel">
@@ -153,14 +154,14 @@ Space / C        jump | up-down (fly)
 Click            interact / teleport
 E                grab / release part
 Wheel            push-pull held part
-R                snap part to home
+R                reset part to home
 T                edit aimed part (role, hinge, lock)
 1 2 3            walk fly teleport
 
 MOBILE
 Left stick       move
 Drag right side  look
-Buttons          interact grab snap
+Buttons          interact grab reset
 
 QUEST 2
 Left stick       move
@@ -218,7 +219,7 @@ Edit mode + AI run on flat screens only.
   <div id="mbtns">
     <button id="mInteract">Interact</button>
     <button id="mGrab">Grab</button>
-    <button id="mSnap">Snap</button>
+    <button id="mSnap">Reset</button>
     <button id="mJump">Jump</button>
     <button id="mEdit">Edit</button>
   </div>
@@ -385,16 +386,15 @@ document.getElementById('btnOpaque').onclick = () => {
 };
 
 /* ============================== simplify: hide smallest parts ============================== */
-// "Simplify" culls the smallest N% of parts by triangle count (tiny fasteners,
-// rounded-edge detail, etc.) rather than decimating every mesh's geometry -
-// CAD exports often carry disproportionate triangle counts on the smallest,
-// least visually important parts. Hiding (not deleting) keeps it reversible
-// by moving the slider back down.
-function partTriCount(mesh){
-  const geo = mesh.geometry;
-  if (!geo) return 0;
-  if (geo.index) return geo.index.count / 3;
-  return (geo.attributes.position?.count || 0) / 3;
+// "Simplify" culls the smallest N% of parts by physical size (bounding-box
+// volume) - tiny fasteners, washers, rounded-edge detail - rather than
+// decimating every mesh's geometry. Hiding (not deleting) keeps it
+// reversible by moving the slider back down.
+function partVolume(mesh){
+  const box = new THREE.Box3().setFromObject(mesh);
+  if (box.isEmpty()) return 0;
+  const s = box.getSize(tmpV);
+  return s.x * s.y * s.z;
 }
 document.getElementById('simplifySlider').oninput = e => {
   document.getElementById('simplifyPct').textContent = (e.target.value * 3) + '%';
@@ -409,7 +409,7 @@ document.getElementById('btnSimplify').onclick = () => {
   for (const m of meshes) m.visible = true;
   const removeN = Math.round(meshes.length * pct);
   if (removeN > 0){
-    const smallest = [...meshes].sort((a, b) => partTriCount(a) - partTriCount(b)).slice(0, removeN);
+    const smallest = [...meshes].sort((a, b) => partVolume(a) - partVolume(b)).slice(0, removeN);
     for (const m of smallest) m.visible = false;
   }
   updateStats();
@@ -421,7 +421,17 @@ document.getElementById('btnSimplify').onclick = () => {
 /* ============================== loading ============================== */
 const loader = new GLTFLoader();
 const loadMenu = document.getElementById('loadMenu');
-document.getElementById('btnLoad').onclick = e => { e.stopPropagation(); loadMenu.classList.toggle('open'); };
+const btnLoad = document.getElementById('btnLoad');
+function positionLoadMenu(){
+  const r = btnLoad.getBoundingClientRect();
+  loadMenu.style.left = r.left + 'px';
+  loadMenu.style.top = (r.bottom + 4) + 'px';
+}
+btnLoad.onclick = e => {
+  e.stopPropagation();
+  if (!loadMenu.classList.contains('open')) positionLoadMenu();
+  loadMenu.classList.toggle('open');
+};
 addEventListener('click', () => loadMenu.classList.remove('open'));
 document.getElementById('btnLoadFile').onclick = () => document.getElementById('file').click();
 document.getElementById('file').onchange = e => { if (e.target.files[0]) readFile(e.target.files[0]); };
@@ -776,7 +786,7 @@ function snapHome(rec){
   rec.node.quaternion.copy(h.quat);
   rec.node.scale.copy(h.scale);
   setGlow(rec.node, 0x000000);
-  toast('Snapped ' + rec.label + ' home');
+  toast(rec.label + ' reset');
 }
 
 function resetAll(){
@@ -1420,7 +1430,7 @@ function updateHover(){
   }
   setHoverGlow(null);
   reticle.classList.remove('hot'); reticle.classList.remove('locked');
-  setHint(held.get(camera) ? ((isTouch?'Snap':'E release, R snap') + ' — holding ' + held.get(camera).label) : '');
+  setHint(held.get(camera) ? ((isTouch?'Reset':'E release, R reset') + ' — holding ' + held.get(camera).label) : '');
 }
 
 /* ============================== drop physics ============================== */
@@ -1438,6 +1448,26 @@ function updateDropping(dt){
 
     // gravity
     d.vel.y -= DROP_GRAVITY * dt;
+
+    // horizontal wall collision — without this, a fast horizontal toss can
+    // pass straight through a thin wall in one frame, since only vertical
+    // ground collision is checked below
+    const stepX = d.vel.x * dt, stepZ = d.vel.z * dt;
+    const horizLen = Math.hypot(stepX, stepZ);
+    if (horizLen > 1e-6){
+      d.node.getWorldPosition(tmpV2);
+      ray.ray.origin.copy(tmpV2);
+      ray.ray.direction.set(stepX / horizLen, 0, stepZ / horizLen);
+      ray.far = horizLen + 0.05;
+      const wallTargets = collidables.filter(o => !isDescendantOf(o, d.node));
+      const wallHit = firstHit(ray.intersectObjects(wallTargets, false));
+      if (wallHit && wallHit.face){
+        const n = wallHit.face.normal.clone().transformDirection(wallHit.object.matrixWorld);
+        if (Math.abs(n.y) < 0.4){   // roughly vertical surface = a wall, not floor/ceiling
+          d.vel.x = 0; d.vel.z = 0;
+        }
+      }
+    }
 
     // integrate position (world-space, but node is child of worldRoot)
     d.node.position.x += d.vel.x * dt;

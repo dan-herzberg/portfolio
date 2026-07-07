@@ -44,7 +44,7 @@ In the part editor, a door also gets a **Lock** toggle. A locked door won't open
 
 Two more Scene-panel tools:
 - **Force opaque** — strips transparency from every material in the loaded scene. If a part looks see-through and turning this on makes it solid, the transparency is coming from the source model's export (an alpha value or `BLEND` alphaMode in the GLB), not the viewer.
-- **Simplify** — a notched slider (3% per notch) that hides the smallest N% of parts by triangle count. CAD exports often carry a disproportionate share of their triangle budget in tiny fasteners and rounded-edge detail; hiding the smallest parts first is usually the cheapest way to cut a scene down. It's non-destructive — hidden parts come back the moment you move the slider down (or reload the model).
+- **Simplify** — a notched slider (3% per notch) that hides the smallest N% of parts by physical size (bounding-box volume). CAD exports often carry a disproportionate share of their triangle budget in tiny fasteners and rounded-edge detail; hiding the smallest parts first is usually the cheapest way to cut a scene down. It's non-destructive — hidden parts come back the moment you move the slider down (or reload the model).
 
 ## Grab and snap-back
 
