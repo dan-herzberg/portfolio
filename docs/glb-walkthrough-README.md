@@ -39,7 +39,7 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 ## Grabbing parts
 
-Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones. Release a grabbed part away from its home position and it falls, bounces a couple of times, and settles into its own natural resting tilt (not just world-flat — a part authored lying on its side settles on its side, not tipped upright) onto whatever is below it, rather than staying wherever you let go or freezing mid-tumble.
+Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones. Release a grabbed part away from its home position and it falls, bounces a couple of times, and comes to rest wherever the tumble physics naturally stops — no forced re-orientation to any prescribed pose, home or otherwise.
 
 While carrying a part, a translucent ghost of it appears at its home slot as soon as you're close enough (position and angle) that releasing would snap it back — a preview of where it's about to land.
 
@@ -51,7 +51,7 @@ In the part editor, a door also gets a **Lock** toggle. A locked door won't open
 
 ## Lights
 
-Set a part's role to **light** to attach a point light at its center and tint its material so it visually reads as a light source. A light created this way is automatically eligible to be toggled by any switch/button within 6 m, same as a light already in the source model.
+Set a part's role to **light** to attach a point light at its center and tint its material so it visually reads as a light source. The light's color is taken from the part's own material (falling back to a warm white if none is found), so a red part casts red light and so on. A light created this way is automatically eligible to be toggled by any switch/button within 6 m, same as a light already in the source model.
 
 ## Force opaque / Simplify
 
@@ -61,7 +61,7 @@ Two more Scene-panel tools:
 
 ## Grab and reset
 
-Grab any registered part, carry it, release it. Release within 0.6 m and ~30° of its original pose and it returns home automatically. **R** (or the Reset button) forces this for the currently aimed/held part. **Reset scene** restores every part, closes every door, turns every switch off, and puts you back at your spawn point.
+Grab any registered part, carry it, release it. Release within one bounding-box diagonal of its original position (so bigger parts get a proportionally bigger snap zone) and ~30° of its original pose and it returns home automatically. **R** (or the Reset button) forces this for the currently aimed/held part. **Reset scene** restores every part, closes every door, turns every switch off, and puts you back at your spawn point.
 
 ## In-situ editing (T key / Edit button)
 

@@ -361,7 +361,7 @@ const ray = new THREE.Raycaster();
 
 const DOOR_RE = /door|gate|hatch|portal/i;
 const SWITCH_RE = /switch|button|btn|lever|toggle/i;
-const SNAP_DIST = 0.6, SNAP_ANG = 0.5;
+const SNAP_ANG = 0.5;   // radians; snap distance is per-part, see registerGrabbable()
 let walkSpeed = 3.6, flySpeed = 6.5;
 const dropping = [];           // {node, vel:Vector3, angVel:Vector3, bounces:0, settled:false}
 let overrides = { roles:{}, settings:{} };   // roles: path -> {role, hinge}
@@ -724,9 +724,14 @@ function registerGrabbable(node){
   node.userData.grabReg = true;
   cloneMaterials(node);
   node.updateMatrixWorld(true);
+  // node is still sitting at its home transform at this point, so a world
+  // bounding box here doubles as the part's own size for the snap radius
+  const box = new THREE.Box3().setFromObject(node);
+  const snapDist = box.isEmpty() ? 0.3 : box.getSize(new THREE.Vector3()).length();
   const rec = {
     node, label: node.name || 'part',
     path: nodePath(node, loadedRoot),
+    snapDist,
     home: {
       parent: node.parent,
       pos: node.position.clone(),
@@ -740,22 +745,33 @@ function registerGrabbable(node){
   markMeshes(node, 'grab', rec, grabMeshes);
 }
 
-function makeGhostMaterial(mat){
-  const m = mat.clone();
-  m.transparent = true;
-  m.opacity = 0.3;
-  m.depthWrite = false;
-  if (m.emissive) m.emissive.setHex(0x000000);
-  return m;
-}
+// A translucent box outline at the part's home slot, shown while carrying it
+// close enough to snap. Deliberately NOT a full clone of the part's mesh -
+// cloning a geometry-heavy grabbed part on every grab was expensive enough
+// to freeze the tab on weaker mobile hardware. A simple box is effectively
+// free to build and just as clear as a placement preview.
 function ensureGhost(rec){
   if (rec.ghost) return rec.ghost;
-  const ghost = rec.node.clone(true);
-  ghost.traverse(o => {
-    if (!o.isMesh) return;
-    o.userData = { isGhost: true };
-    o.material = Array.isArray(o.material) ? o.material.map(makeGhostMaterial) : makeGhostMaterial(o.material);
+  const invRoot = new THREE.Matrix4().copy(rec.node.matrixWorld).invert();
+  const localBox = new THREE.Box3();
+  const meshBox = new THREE.Box3();
+  rec.node.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    meshBox.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld).applyMatrix4(invRoot);
+    localBox.union(meshBox);
   });
+  const size = localBox.isEmpty() ? new THREE.Vector3(0.1,0.1,0.1) : localBox.getSize(new THREE.Vector3());
+  const center = localBox.isEmpty() ? new THREE.Vector3() : localBox.getCenter(new THREE.Vector3());
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(Math.max(size.x,0.02), Math.max(size.y,0.02), Math.max(size.z,0.02)),
+    new THREE.MeshBasicMaterial({ color:0xe0a43c, transparent:true, opacity:0.25, depthWrite:false })
+  );
+  box.position.copy(center);
+  box.userData = { isGhost: true };
+
+  const ghost = new THREE.Group();
+  ghost.add(box);
   ghost.position.copy(rec.home.pos);
   ghost.quaternion.copy(rec.home.quat);
   ghost.scale.copy(rec.home.scale);
@@ -777,7 +793,7 @@ function updateGhosts(){
     rec.node.getWorldQuaternion(tmpQ);
     const d = tmpV.distanceTo(rec.homeWorldPos);
     const a = 2 * Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
-    ghost.visible = d < SNAP_DIST && a < SNAP_ANG;
+    ghost.visible = d < rec.snapDist && a < SNAP_ANG;
   }
 }
 
@@ -788,7 +804,18 @@ function makeLight(node){
   node.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(node);
   const centerWorld = box.isEmpty() ? node.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
-  const light = new THREE.PointLight(0xfff2cc, 8, 10);
+
+  // emit the part's own color rather than a fixed warm-white, so a red part
+  // casts red light and so on
+  let color = new THREE.Color(0xfff2cc);
+  let foundColor = false;
+  node.traverse(o => {
+    if (foundColor || !o.isMesh || !o.material) return;
+    const m = Array.isArray(o.material) ? o.material[0] : o.material;
+    if (m && m.color){ color = m.color.clone(); foundColor = true; }
+  });
+
+  const light = new THREE.PointLight(color, 8, 10);
   light.position.copy(node.worldToLocal(centerWorld.clone()));
   light.name = (node.name || 'light') + '__lightsrc';
   node.add(light);
@@ -800,7 +827,7 @@ function makeLight(node){
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats){
       if (!m.emissive) continue;
-      m.emissive.setHex(0xfff2cc);
+      m.emissive.copy(color);
       if ('emissiveIntensity' in m) m.emissiveIntensity = 1.2;
     }
   });
@@ -909,7 +936,7 @@ function releaseHeld(holder, announce=true){
   rec.node.getWorldQuaternion(tmpQ);
   const d = tmpV.distanceTo(rec.homeWorldPos);
   const a = 2*Math.acos(Math.min(1, Math.abs(tmpQ.dot(rec.homeWorldQuat))));
-  if (d < SNAP_DIST && a < SNAP_ANG){ snapHome(rec); return; }
+  if (d < rec.snapDist && a < SNAP_ANG){ snapHome(rec); return; }
   // start drop physics — small downward + forward toss
   const vel = new THREE.Vector3(0, -0.3, 0);
   // add a bit of the player's look direction as throw impulse
@@ -921,7 +948,7 @@ function releaseHeld(holder, announce=true){
     (Math.random()-0.5)*1.5,
     (Math.random()-0.5)*2.5
   );
-  dropping.push({ node: rec.node, rec, vel, angVel, bounces:0, time:0 });
+  dropping.push({ node: rec.node, vel, angVel, bounces:0, time:0 });
   if (announce) toast('Dropped ' + rec.label);
 }
 
@@ -1645,24 +1672,11 @@ const DROP_ANG_DAMP = 0.5;     // angular velocity damped per bounce
 const DROP_SETTLE_VEL = 0.15;  // speed below which we consider it settled
 const DROP_MAX_BOUNCES = 3;    // force-settle after this many bounces regardless of speed
 const DROP_MAX_TIME = 4;       // max seconds before force-settling
-const DROP_SETTLE_TIME = 0.15; // seconds to ease tilt flat once settled, instead of freezing mid-tumble
 
 function updateDropping(dt){
   for (let i = dropping.length - 1; i >= 0; i--){
     const d = dropping[i];
     d.time += dt;
-
-    if (d.settling){
-      // ease any leftover tumble tilt flat instead of leaving the part
-      // frozen at whatever angle it happened to stop tumbling at
-      d.settleT += dt;
-      const p = Math.min(d.settleT / DROP_SETTLE_TIME, 1);
-      const k = 1 - (1 - p) * (1 - p) * (1 - p);   // ease-out cubic
-      d.node.rotation.x = THREE.MathUtils.lerp(d.settleFromRotX, d.settleToRotX, k);
-      d.node.rotation.z = THREE.MathUtils.lerp(d.settleFromRotZ, d.settleToRotZ, k);
-      if (p >= 1) dropping.splice(i, 1);
-      continue;
-    }
 
     // gravity
     d.vel.y -= DROP_GRAVITY * dt;
@@ -1728,32 +1742,22 @@ function updateDropping(dt){
       d.angVel.multiplyScalar(DROP_ANG_DAMP);
       d.bounces++;
 
-      // check if settled
+      // settled: stop right here, whatever tilt the tumble physics left it
+      // at - no forced re-orientation to any prescribed pose, home or
+      // otherwise. Natural, if occasionally imperfect, beats obviously
+      // scripted-looking self-righting.
       const speed = Math.hypot(d.vel.x, d.vel.y, d.vel.z);
       if (speed < DROP_SETTLE_VEL || d.bounces >= DROP_MAX_BOUNCES || d.time > DROP_MAX_TIME){
-        beginSettle(d);
+        dropping.splice(i, 1);
+        continue;
       }
     }
 
     // timeout safety
-    if (!d.settling && d.time > DROP_MAX_TIME){
-      beginSettle(d);
+    if (d.time > DROP_MAX_TIME){
+      dropping.splice(i, 1);
     }
   }
-}
-function beginSettle(d){
-  d.vel.set(0, 0, 0);
-  d.angVel.set(0, 0, 0);
-  d.settling = true;
-  d.settleT = 0;
-  d.settleFromRotX = d.node.rotation.x;
-  d.settleFromRotZ = d.node.rotation.z;
-  // level toward the part's own authored resting tilt, not world-zero - a
-  // shape like a torus rests naturally at rotation.x = PI/2, not 0, and
-  // forcing it to 0 is exactly what made it stand up on end after a drop
-  const homeEuler = new THREE.Euler().setFromQuaternion(d.rec.home.quat, 'XYZ');
-  d.settleToRotX = homeEuler.x;
-  d.settleToRotZ = homeEuler.z;
 }
 
 /* ============================== animation loop ============================== */
