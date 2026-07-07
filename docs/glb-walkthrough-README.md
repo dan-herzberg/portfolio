@@ -37,7 +37,7 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 **Teleport mode** shows a ring on the floor wherever you're currently aiming, so you can see exactly where you'll land before you click/trigger.
 
-**Button availability:** on touch devices, the on-screen Interact / Grab / Reset / Edit buttons light up when aiming at something that action currently applies to, and the Grab button reads **Release** while you're holding a part.
+**Button availability:** on touch devices, the on-screen Interact / Grab / Reset / Edit buttons light up when aiming at something that action currently applies to, and the Grab button reads **Release** while you're holding a part. In teleport mode, the Interact button reads **Teleport** while aiming at a spot you can actually teleport to.
 
 **Light/dark environment:** the **Light mode / Dark mode** button in the Scene panel swaps the surrounding environment (sky, fog, ground plane, lighting intensity) between a dark studio look and a bright one. Loaded models keep their own materials either way.
 
@@ -45,7 +45,7 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 Nothing is grabbable by default. Aim at a part and press **T** (or the Edit button), then pick the **grabbable** role to make it liftable — this works on any named part at any depth, not just top-level ones.
 
-Carrying a part tracks its actual recent motion (from the mouse, the wheel push/pull, or a VR controller), so throwing it imparts real momentum in the direction you were moving it — this glide decays quickly rather than sailing across the room, while the fall itself is driven by ordinary, uniform gravity. On impact the part rotates about its own center of mass and tumbles realistically from one contact to the next (an off-center hit spins it, a flat landing doesn't), rather than following a canned bounce-and-decay curve. It settles once it's bounced at least twice and has three points simultaneously resting on the floor or another object — every mesh is faceted, so even a sphere or cylinder eventually gets three vertices down — and then freezes exactly where it stopped, with no forced re-orientation to any prescribed pose, home or otherwise.
+Carrying a part tracks its actual recent motion (from the mouse, the wheel push/pull, or a VR controller), so throwing it imparts real momentum in the direction you were moving it — this glide decays quickly rather than sailing across the room, while the fall itself is driven by ordinary, uniform gravity. On impact the part rotates about its own center of mass and tumbles realistically from one contact to the next (an off-center hit spins it, a flat landing doesn't), rather than following a canned bounce-and-decay curve. It settles once it's bounced at least twice, has three points simultaneously resting on the floor or another object — every mesh is faceted, so even a sphere or cylinder eventually gets three vertices down — and is essentially motionless. The motion requirement is what lets a part that lands tilted keep tipping under gravity to its lowest-energy resting pose instead of freezing mid-tumble; once it truly stops, it freezes exactly there, with no forced re-orientation to any prescribed pose, home or otherwise.
 
 While carrying a part, a thin vertical line drops from the part to whatever is below it, as a depth cue — judging carry height is otherwise hard, especially in VR. Returning a part home is distance-based only: get it within one bounding-box diagonal of its home spot and release, and it snaps back regardless of how it's rotated.
 
