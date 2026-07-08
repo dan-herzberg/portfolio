@@ -1770,6 +1770,9 @@ const isTouch = uaMobile && !hasFinePointer
   || (primaryPointerCoarse && !hasFinePointer && (navigator.maxTouchPoints || 0) > 0);
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
+console.log('[input] isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
+  '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
+  '| maxTouch:', navigator.maxTouchPoints);
 
 /* ============================== collapsible HUD ============================== */
 const hud = document.getElementById('hud');
@@ -1811,9 +1814,18 @@ addEventListener('wheel', e => {
 function centerRay(){ ray.setFromCamera({x:0,y:0}, camera); return ray; }
 
 renderer.domElement.addEventListener('click', () => {
-  if (isTouch || renderer.xr.isPresenting) return;
+  if (renderer.xr.isPresenting) return;
+  // On desktop (or if touch detection got it wrong but mobile UI is hidden),
+  // clicking the canvas should lock the pointer for mouselook
+  if (isTouch && document.getElementById('mobile').style.display === 'block') return;
   if (document.pointerLockElement !== renderer.domElement){
-    renderer.domElement.requestPointerLock();
+    const lockPromise = renderer.domElement.requestPointerLock();
+    if (lockPromise && lockPromise.catch){
+      lockPromise.catch(err => {
+        // Pointer lock denied — likely file:// origin or user gesture issue
+        toast('Pointer lock denied: ' + (err.message || 'try HTTPS or localhost'));
+      });
+    }
     return;
   }
   camera.getWorldPosition(tmpV3);
