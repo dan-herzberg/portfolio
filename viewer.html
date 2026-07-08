@@ -1755,16 +1755,19 @@ function applyOps(ops){
 }
 
 /* ============================== desktop input ============================== */
-// A touchscreen laptop with a mouse attached still reports maxTouchPoints > 0,
-// so touch capability alone isn't enough - check whether touch is the
-// *primary* input (pointer: coarse tests the primary pointing device, not
-// just "any" available one) and corroborate with a UA/client-hints mobile
-// check, so a mouse-primary touchscreen laptop still reads as desktop.
+// Device detection: determine input mode.
+// A touchscreen laptop with a mouse attached must read as desktop.
+// pointer:fine = mouse/trackpad is the primary input (most reliable signal)
+// pointer:coarse = finger is primary input (phone/tablet)
+// For ambiguous cases (touch-enabled Windows laptop), prefer desktop if a
+// fine pointer is available at all (pointer:fine OR any-pointer:fine).
 const uaMobile = navigator.userAgentData
   ? navigator.userAgentData.mobile
   : /Mobi|Android|iPhone|iPad|iPod|Silk|Windows Phone/i.test(navigator.userAgent);
+const hasFinePointer = matchMedia('(pointer: fine)').matches || matchMedia('(any-pointer: fine)').matches;
 const primaryPointerCoarse = matchMedia('(pointer: coarse)').matches;
-const isTouch = uaMobile || (primaryPointerCoarse && (navigator.maxTouchPoints || 0) > 0);
+const isTouch = uaMobile && !hasFinePointer
+  || (primaryPointerCoarse && !hasFinePointer && (navigator.maxTouchPoints || 0) > 0);
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
 
@@ -1833,7 +1836,7 @@ const look = { id:null, lx:0, ly:0 };
 const stickEl = document.getElementById('stick'), knob = document.getElementById('knob');
 let mUpHeld=false, mDownHeld=false, mJumpHeld=false;
 
-{
+if (isTouch) {
   stickEl.addEventListener('touchstart', e => {
     const t = e.changedTouches[0];
     joy.active = true; joy.id = t.identifier;
