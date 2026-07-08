@@ -247,7 +247,7 @@ Edit mode + AI run on flat screens only.
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.mjs"
+  "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"
 }}
 </script>
 
@@ -1975,8 +1975,10 @@ function physicsMarkStaticDirty(){ physStaticDirty = true; }
 // than taking the whole page down.
 async function initPhysics(){
   try {
-    const mod = await import('@dimforge/rapier3d-compat');
-    RAPIER = mod.default || mod;
+    // the compat build exposes its API as NAMED exports on the namespace
+    // (World, ColliderDesc, init, ...); the module's `default` export is
+    // something else, so use the namespace itself, not mod.default
+    RAPIER = await import('@dimforge/rapier3d-compat');
     await RAPIER.init();
     physWorld = new RAPIER.World(physGravity);
     physReady = true;
