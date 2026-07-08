@@ -2103,46 +2103,46 @@ renderer.setAnimationLoop(() => {
   // callback permanently stops the loop, freezing the view - which reads as
   // "mouse capture broke" (pointer locks, nothing re-renders). Catch here so
   // rendering and camera control survive a misbehaving subsystem (e.g. the
-  // untested physics step).
+  // physics step).
   try {
-  updateMovement(dt);
+    updateMovement(dt);
 
-  for (const i of interactables){
-    if (i.kind==='door'){
-      i.angle = THREE.MathUtils.damp(i.angle, i.target, 6, dt);
-      i.pivot.rotation.y = i.closedY + i.angle;
-    } else if (i.animT > 0){
-      i.animT = Math.max(0, i.animT - dt*4);
-      const k = Math.sin(i.animT * Math.PI);
-      if (i.isButton){
-        const s = 1 - 0.35*k;
-        i.node.scale.copy(i.baseScale);
-        i.node.scale[i.pressAxis] *= s;
-      } else {
-        i.node.rotation.copy(i.baseRot);
-        i.node.rotation.x = i.baseRot.x + (i.on ? 0.45 : -0.45) * (1 - i.animT);
+    for (const i of interactables){
+      if (i.kind==='door'){
+        i.angle = THREE.MathUtils.damp(i.angle, i.target, 6, dt);
+        i.pivot.rotation.y = i.closedY + i.angle;
+      } else if (i.animT > 0){
+        i.animT = Math.max(0, i.animT - dt*4);
+        const k = Math.sin(i.animT * Math.PI);
+        if (i.isButton){
+          const s = 1 - 0.35*k;
+          i.node.scale.copy(i.baseScale);
+          i.node.scale[i.pressAxis] *= s;
+        } else {
+          i.node.rotation.copy(i.baseRot);
+          i.node.rotation.x = i.baseRot.x + (i.on ? 0.45 : -0.45) * (1 - i.animT);
+        }
       }
     }
-  }
 
-  hoverTick += dt;
-  if (hoverTick > 0.08){ hoverTick = 0; updateHover(); }
+    hoverTick += dt;
+    if (hoverTick > 0.08){ hoverTick = 0; updateHover(); }
 
-  // every frame, not throttled like updateHover(), so the marker tracks
-  // smoothly as the camera moves
-  updateTeleportMarker();
+    // every frame, not throttled like updateHover(), so the marker tracks
+    // smoothly as the camera moves
+    updateTeleportMarker();
 
-  // physics engine step for released parts
-  physicsStep(dt);
+    // physics engine step for released parts
+    physicsStep(dt);
 
-  // snap-together check for held composite halves
-  updateAssembly();
+    // snap-together check for held composite halves
+    updateAssembly();
 
-  // home-slot preview while carrying a part close enough to snap
-  updateGhosts();
+    // home-slot preview while carrying a part close enough to snap
+    updateGhosts();
 
-  // depth-cue line from each carried part down to the ground
-  updateDepthLines();
+    // depth-cue line from each carried part down to the ground
+    updateDepthLines();
   } catch (e){
     if (!loopErrorLogged){ console.error('[loop] subsystem error (rendering continues):', e); loopErrorLogged = true; }
   }
