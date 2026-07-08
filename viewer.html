@@ -718,9 +718,11 @@ function buildWorld(root, label, keepPlayer=false){
   }
 
   currentLabel = label;
-  document.getElementById('simplifySlider').value = 0;
-  document.getElementById('simplifyPct').textContent = '0%';
-  if (!keepPlayer) suppressedPaths = new Set();  // fresh load clears suppression
+  if (!keepPlayer){
+    document.getElementById('simplifySlider').value = 0;
+    document.getElementById('simplifyPct').textContent = '0%';
+    suppressedPaths = new Set();  // fresh load clears suppression
+  }
   updateStats();
   if (forceOpaque) setForceOpaque(true);
   toast('Loaded ' + label);
