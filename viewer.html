@@ -85,9 +85,22 @@
     box-shadow:0 0 10px rgba(224,164,60,.35);}
   #vslide{position:fixed;right:110px;bottom:70px;z-index:10;display:none;flex-direction:column;gap:8px;}
 
-  #editPanel{position:fixed;left:50%;top:16%;transform:translateX(-50%);width:min(320px,92vw);
-    z-index:12;display:none;}
+  #editPanel{position:fixed;left:50%;top:16%;transform:translateX(-50%);width:min(360px,92vw);
+    z-index:12;display:none;max-height:70vh;overflow-y:auto;}
   #editPanel button{font-size:12px;padding:7px 8px;}
+  #editTree{margin-bottom:8px;font-size:11px;line-height:1.6;}
+  #editTree .tree-node{padding:2px 4px;border-radius:4px;cursor:pointer;color:var(--dim);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #editTree .tree-node:hover{background:rgba(255,255,255,.06);}
+  #editTree .tree-node.selected{color:var(--accent);background:rgba(224,164,60,.12);font-weight:600;}
+  #editColorRow{margin-top:8px;display:none;align-items:center;gap:6px;}
+  #editColorPicker{width:36px;height:28px;border:1px solid var(--line);border-radius:4px;
+    padding:0;cursor:pointer;background:transparent;}
+  #editColorSwatches{display:flex;gap:4px;flex-wrap:wrap;}
+  #editColorSwatches .swatch{width:22px;height:22px;border-radius:4px;border:1px solid var(--line);
+    cursor:pointer;}
+  #editColorSwatches .swatch:hover{border-color:var(--accent);}
+  #editColorClear{font-size:11px;padding:4px 8px;}
 
   #aiBtn{position:fixed;right:58px;bottom:10px;z-index:11;width:40px;height:40px;border-radius:50%;font-size:12px;font-weight:700;}
   #claudeBar{position:fixed;right:10px;bottom:58px;width:min(360px,92vw);z-index:11;display:none;}
@@ -192,15 +205,19 @@ Edit mode + AI run on flat screens only.
 
 <div id="editPanel" class="panel">
   <div class="label">Edit part</div>
+  <div id="editTree"></div>
   <div id="editName" class="mono" style="font-size:12px;margin-bottom:8px;color:var(--accent);"></div>
-  <div class="row" style="margin-bottom:8px;">
-    <button id="editParent">&#9650; Parent</button>
-    <button id="editChild">&#9660; Child</button>
-  </div>
   <div class="row" id="editRoles"></div>
   <div class="row" style="margin-top:8px;">
     <button id="editHinge">Flip hinge</button>
     <button id="editLock">Lock</button>
+  </div>
+  <div id="editColorRow">
+    <input type="color" id="editColorPicker" value="#e0a43c"/>
+    <div id="editColorSwatches"></div>
+    <button id="editColorClear">Clear</button>
+  </div>
+  <div class="row" style="margin-top:8px;">
     <button id="editClose">Close</button>
   </div>
 </div>
@@ -486,37 +503,88 @@ document.getElementById('btnOpaque').onclick = () => {
   toast('Force opaque: ' + (forceOpaque ? 'on' : 'off'));
 };
 
-/* ============================== simplify: hide smallest parts ============================== */
-// "Simplify" culls the smallest N% of parts by physical size (bounding-box
-// volume) - tiny fasteners, washers, rounded-edge detail - rather than
-// decimating every mesh's geometry. Hiding (not deleting) keeps it
-// reversible by moving the slider back down.
+/* ============================== simplify: dispose smallest parts ============================== */
+// "Simplify" fully removes the smallest N% of parts by physical size
+// (bounding-box volume) from the scene graph and disposes their GPU resources.
+// Re-showing hidden parts requires re-parsing the GLB, so we show a spinner.
+let suppressedPaths = new Set();   // paths of disposed parts (survives rebuild)
+let simplifyWorking = false;
+
 function partVolume(mesh){
   const box = new THREE.Box3().setFromObject(mesh);
   if (box.isEmpty()) return 0;
   const s = box.getSize(tmpV);
   return s.x * s.y * s.z;
 }
+function disposeNode(node){
+  node.traverse(o => {
+    if (o.isMesh){
+      if (o.geometry) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats){
+        if (m.map) m.map.dispose();
+        if (m.normalMap) m.normalMap.dispose();
+        if (m.roughnessMap) m.roughnessMap.dispose();
+        if (m.metalnessMap) m.metalnessMap.dispose();
+        if (m.aoMap) m.aoMap.dispose();
+        if (m.emissiveMap) m.emissiveMap.dispose();
+        m.dispose();
+      }
+    }
+  });
+  if (node.parent) node.parent.remove(node);
+}
 document.getElementById('simplifySlider').oninput = e => {
   document.getElementById('simplifyPct').textContent = (e.target.value * 3) + '%';
 };
-document.getElementById('btnSimplify').onclick = () => {
-  if (!worldRoot){ toast('Load a scene first'); return; }
+document.getElementById('btnSimplify').onclick = async () => {
+  if (!worldRoot || !lastSource){ toast('Load a scene first'); return; }
+  if (simplifyWorking) return;
   const notch = parseInt(document.getElementById('simplifySlider').value, 10);
   const pct = notch * 0.03;
-  const meshes = [];
-  worldRoot.traverse(o => { if (o.isMesh && o.name !== '__floor' && !o.userData.isGhost) meshes.push(o); });
-  if (!meshes.length){ toast('No parts to simplify'); return; }
-  for (const m of meshes) m.visible = true;
-  const removeN = Math.round(meshes.length * pct);
+
+  // Collect all named leaf/group nodes as potential "parts"
+  const parts = [];
+  worldRoot.traverse(o => {
+    if (o === worldRoot) return;
+    if (o.name === '__floor' || o.userData.isGhost) return;
+    // count a node as a "part" if it has geometry or is a named group
+    if (o.isMesh || (o.name && o.children.some(c => c.isMesh))){
+      parts.push({ node: o, path: nodePath(o, loadedRoot), vol: partVolume(o) });
+    }
+  });
+  if (!parts.length){ toast('No parts to simplify'); return; }
+
+  const removeN = Math.round(parts.length * pct);
+  const newSuppressed = new Set();
   if (removeN > 0){
-    const smallest = [...meshes].sort((a, b) => partVolume(a) - partVolume(b)).slice(0, removeN);
-    for (const m of smallest) m.visible = false;
+    const smallest = [...parts].sort((a, b) => a.vol - b.vol).slice(0, removeN);
+    for (const p of smallest) newSuppressed.add(p.path);
   }
-  updateStats();
+
+  // If suppression set changed, rebuild
+  const oldSize = suppressedPaths.size;
+  const same = newSuppressed.size === oldSize && [...newSuppressed].every(p => suppressedPaths.has(p));
+  if (same){
+    toast(removeN > 0
+      ? `Already hiding ${removeN} of ${parts.length} smallest parts`
+      : 'Showing all parts');
+    return;
+  }
+
+  suppressedPaths = newSuppressed;
+  simplifyWorking = true;
   toast(removeN > 0
-    ? `Hid ${removeN} of ${meshes.length} smallest parts (~${notch*3}%)`
-    : 'Showing all parts');
+    ? `Suppressing ${removeN} of ${parts.length} parts... rebuilding`
+    : 'Restoring all parts... rebuilding');
+
+  // Allow toast to render, then rebuild (re-parses GLB from buffer)
+  await new Promise(r => setTimeout(r, 50));
+  rebuildWorld();
+  simplifyWorking = false;
+  toast(removeN > 0
+    ? `Disposed ${removeN} of ${parts.length} smallest parts (~${notch*3}%)`
+    : 'All parts restored');
 };
 
 /* ============================== loading ============================== */
@@ -651,6 +719,7 @@ function buildWorld(root, label, keepPlayer=false){
   currentLabel = label;
   document.getElementById('simplifySlider').value = 0;
   document.getElementById('simplifyPct').textContent = '0%';
+  if (!keepPlayer) suppressedPaths = new Set();  // fresh load clears suppression
   updateStats();
   if (forceOpaque) setForceOpaque(true);
   toast('Loaded ' + label);
@@ -663,7 +732,7 @@ function buildWorld(root, label, keepPlayer=false){
       editChainIdx = 0;
       renderEditor();
     }
-    else document.getElementById('editPanel').style.display='none';
+    else closeEditor();
   }
 }
 
@@ -698,6 +767,22 @@ function classify(root){
   // nothing is grabbable by default; mark parts grabbable individually via
   // the Edit-mode role panel (T key / Edit button), same as door/switch roles
   for (const n of forcedGrabs) registerGrabbable(n);
+
+  // apply saved colors from overrides
+  for (const [path, ov] of Object.entries(overrides.roles)){
+    if (ov.color){
+      const node = pathIndex.get(path);
+      if (node) applyColorToNode(node, ov.color);
+    }
+  }
+
+  // dispose suppressed parts (simplification slider)
+  if (suppressedPaths.size > 0){
+    for (const path of suppressedPaths){
+      const node = pathIndex.get(path);
+      if (node) disposeNode(node);
+    }
+  }
 }
 
 function cloneMaterials(node){
@@ -1265,8 +1350,11 @@ document.getElementById('flySpeedSlider').oninput = e => {
 /* ============================== in-situ editor ============================== */
 const ROLES = ['door','switch','button','grabbable','static','light'];
 const editPanel = document.getElementById('editPanel');
-let editChain = [];     // named ancestors from the raycast hit (0) up to the top-level part
+let editChain = [];     // named ancestors from the raycast hit (leaf at 0) up to the top-level part
 let editChainIdx = 0;
+let editHighlight = null; // outline/glow on the currently selected node
+let recentColors = JSON.parse(localStorage.getItem('glbv_recentColors') || '[]').slice(0, 8);
+
 function buildEditChain(hitObject){
   const chain = [];
   let n = hitObject;
@@ -1278,7 +1366,7 @@ function buildEditChain(hitObject){
 }
 function openEditor(){
   if (!worldRoot){ toast('Load a scene first'); return; }
-  if (editPanel.style.display === 'block'){ editPanel.style.display='none'; return; }
+  if (editPanel.style.display === 'block'){ closeEditor(); return; }
   const r = centerRay(); r.far = 8;
   const meshes = [];
   worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
@@ -1293,28 +1381,72 @@ function openEditor(){
   editPanel.style.display = 'block';
   if (document.pointerLockElement) document.exitPointerLock();
 }
-document.getElementById('editParent').onclick = () => {
-  if (editChainIdx >= editChain.length - 1) return;
-  editChainIdx++;
+function closeEditor(){
+  editPanel.style.display = 'none';
+  clearEditHighlight();
+}
+function clearEditHighlight(){
+  if (editHighlight){
+    editHighlight.traverse(o => {
+      if (o.isMesh){
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats){
+          if (m._editOrigEmissive !== undefined){
+            m.emissive.setHex(m._editOrigEmissive);
+            delete m._editOrigEmissive;
+          }
+        }
+      }
+    });
+    editHighlight = null;
+  }
+}
+function setEditHighlight(node){
+  clearEditHighlight();
+  editHighlight = node;
+  node.traverse(o => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats){
+      if (m.emissive){
+        m._editOrigEmissive = m.emissive.getHex();
+        m.emissive.setHex(0x1a3a5a);
+      }
+    }
+  });
+}
+function selectChainNode(idx){
+  editChainIdx = idx;
   editTarget = editChain[editChainIdx];
   editPath = pathFor(editTarget);
   renderEditor();
-};
-document.getElementById('editChild').onclick = () => {
-  if (editChainIdx <= 0) return;
-  editChainIdx--;
-  editTarget = editChain[editChainIdx];
-  editPath = pathFor(editTarget);
-  renderEditor();
-};
+}
 function renderEditor(){
+  // Tree view — indented hierarchy from root to leaf
+  const treeEl = document.getElementById('editTree');
+  treeEl.innerHTML = '';
+  for (let i = editChain.length - 1; i >= 0; i--){
+    const node = editChain[i];
+    const depth = editChain.length - 1 - i;
+    const div = document.createElement('div');
+    div.className = 'tree-node' + (i === editChainIdx ? ' selected' : '');
+    div.style.paddingLeft = (8 + depth * 14) + 'px';
+    div.textContent = node.name || '(unnamed)';
+    const capturedIdx = i;
+    div.onclick = () => selectChainNode(capturedIdx);
+    treeEl.appendChild(div);
+  }
+
+  // Highlight the selected node in the 3D scene
+  setEditHighlight(editTarget);
+
+  // Role info
   const role = currentRole(editTarget);
   const ov = overrides.roles[editPath];
   document.getElementById('editName').textContent =
-    (editTarget.name || editPath) + '  [' + role + (ov ? ', edited' : '') + ']'
-    + `  (${editChainIdx + 1}/${editChain.length})`;
-  document.getElementById('editParent').disabled = editChainIdx >= editChain.length - 1;
-  document.getElementById('editChild').disabled = editChainIdx <= 0;
+    (editTarget.name || editPath) + '  [' + role + (ov ? ', edited' : '') + ']';
+
+  // Role buttons
   const row = document.getElementById('editRoles');
   row.innerHTML = '';
   for (const rr of ROLES){
@@ -1324,6 +1456,8 @@ function renderEditor(){
     b.onclick = () => setRoleOverride(editPath, rr);
     row.appendChild(b);
   }
+
+  // Door-specific controls
   document.getElementById('editHinge').style.display = role==='door' ? '' : 'none';
   const lockBtn = document.getElementById('editLock');
   lockBtn.style.display = role==='door' ? '' : 'none';
@@ -1331,10 +1465,64 @@ function renderEditor(){
     const existing = findInterFor(editTarget);
     lockBtn.classList.toggle('on', !!(existing && existing.locked));
   }
+
+  // Color controls — always shown
+  const colorRow = document.getElementById('editColorRow');
+  colorRow.style.display = 'flex';
+  const currentColor = overrides.roles[editPath] && overrides.roles[editPath].color;
+  document.getElementById('editColorPicker').value = currentColor || '#e0a43c';
+  renderColorSwatches();
 }
+function renderColorSwatches(){
+  const container = document.getElementById('editColorSwatches');
+  container.innerHTML = '';
+  for (const hex of recentColors){
+    const s = document.createElement('div');
+    s.className = 'swatch';
+    s.style.background = hex;
+    s.onclick = () => applyColor(hex);
+    container.appendChild(s);
+  }
+}
+function applyColor(hex){
+  // Save to overrides
+  if (!overrides.roles[editPath]) overrides.roles[editPath] = { role: currentRole(editTarget) };
+  overrides.roles[editPath].color = hex;
+  // Track recent colors
+  recentColors = [hex, ...recentColors.filter(c => c !== hex)].slice(0, 8);
+  localStorage.setItem('glbv_recentColors', JSON.stringify(recentColors));
+  renderColorSwatches();
+  // Apply to material immediately (no rebuild needed)
+  applyColorToNode(editTarget, hex);
+  toast('Color: ' + hex);
+}
+function applyColorToNode(node, hex){
+  const color = new THREE.Color(hex);
+  node.traverse(o => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats){
+      if (m.color) m.color.copy(color);
+    }
+  });
+}
+function clearColor(){
+  if (overrides.roles[editPath]){
+    delete overrides.roles[editPath].color;
+    if (Object.keys(overrides.roles[editPath]).length <= 1 && overrides.roles[editPath].role === 'static'){
+      delete overrides.roles[editPath];
+    }
+  }
+  // Rebuild to restore original material colors from the GLB
+  rebuildWorld();
+  toast('Color cleared');
+}
+document.getElementById('editColorPicker').oninput = e => applyColor(e.target.value);
+document.getElementById('editColorClear').onclick = clearColor;
+
 function setRoleOverride(path, role, hinge){
   const prev = overrides.roles[path] || {};
-  overrides.roles[path] = { role, hinge: hinge || prev.hinge || 'left' };
+  overrides.roles[path] = { ...prev, role, hinge: hinge || prev.hinge || 'left' };
   rebuildWorld();
 }
 document.getElementById('editHinge').onclick = () => {
@@ -1354,7 +1542,7 @@ document.getElementById('editLock').onclick = () => {
   toast(prev.locked ? 'Locked' : 'Unlocked');
   rebuildWorld();
 };
-document.getElementById('editClose').onclick = () => editPanel.style.display = 'none';
+document.getElementById('editClose').onclick = closeEditor;
 
 /* ============================== overrides file i/o ============================== */
 document.getElementById('btnExport').onclick = () => {
@@ -1454,6 +1642,7 @@ async function runCommand(){
     '{"op":"snapAll"} resets every part, door, and switch. ' +
     '{"op":"setMode","mode":"walk|fly|teleport"}. ' +
     '{"op":"setSpeed","walk":number,"fly":number} in m/s, either key optional. ' +
+    '{"op":"setColor","path":P,"color":"#rrggbb"} sets part color; use null to clear. ' +
     'Use only paths from this inventory, matched by closest name. Inventory: ' + JSON.stringify(sceneInventory()) +
     ' Current mode: ' + mode + ', walkSpeed ' + walkSpeed + ', flySpeed ' + flySpeed + '.';
   try {
@@ -1544,6 +1733,21 @@ function applyOps(ops){
         overrides.settings = { walkSpeed, flySpeed };
         applied++;
         break;
+      case 'setColor': {
+        const node = pathIndex.get(op.path);
+        if (node && op.color){
+          if (!overrides.roles[op.path]) overrides.roles[op.path] = { role: currentRole(node) };
+          overrides.roles[op.path].color = op.color;
+          applyColorToNode(node, op.color);
+          recentColors = [op.color, ...recentColors.filter(c => c !== op.color)].slice(0, 8);
+          localStorage.setItem('glbv_recentColors', JSON.stringify(recentColors));
+          applied++;
+        } else if (node && op.color === null){
+          if (overrides.roles[op.path]) delete overrides.roles[op.path].color;
+          needRebuild = true; applied++;
+        }
+        break;
+      }
     }
   }
   if (needRebuild) rebuildWorld();
