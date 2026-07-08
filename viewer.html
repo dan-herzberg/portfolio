@@ -2096,8 +2096,15 @@ function physicsStep(dt){
 /* ============================== animation loop ============================== */
 const clock = new THREE.Clock();
 let hoverTick = 0;
+let loopErrorLogged = false;
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
+  // Guard per-frame subsystems: an uncaught throw in a setAnimationLoop
+  // callback permanently stops the loop, freezing the view - which reads as
+  // "mouse capture broke" (pointer locks, nothing re-renders). Catch here so
+  // rendering and camera control survive a misbehaving subsystem (e.g. the
+  // untested physics step).
+  try {
   updateMovement(dt);
 
   for (const i of interactables){
@@ -2136,6 +2143,9 @@ renderer.setAnimationLoop(() => {
 
   // depth-cue line from each carried part down to the ground
   updateDepthLines();
+  } catch (e){
+    if (!loopErrorLogged){ console.error('[loop] subsystem error (rendering continues):', e); loopErrorLogged = true; }
+  }
 
   renderer.render(scene, camera);
 });
