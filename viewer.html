@@ -1790,10 +1790,18 @@ function applyOps(ops){
 /* ============================== desktop input ============================== */
 // Device detection: determine input mode.
 // Some Windows touchscreen desktops report all pointer/hover media queries as
-// coarse/none even with a mouse connected. Static detection fails completely.
-// Strategy: if queries are ambiguous (coarse but not confirmed mobile UA),
-// defer showing mobile UI for 600ms — if a mouse moves in that window, skip
-// mobile entirely. True phones/tablets show mobile UI immediately (uaMobile).
+// coarse/none even with a mouse connected - static detection alone can't be
+// trusted on those machines. Two layers:
+//   1. Best-effort static guess, used for the very first frame so there's
+//      no UI flash while waiting for input.
+//   2. Permanent runtime correction from live pointerType, for the rest of
+//      the session - not just a narrow window at load. A prior version of
+//      this fix used a one-shot 600ms mouse probe at boot: if the mouse
+//      didn't move in that window (entirely plausible - page load, reading
+//      time, hesitation), it committed to touch mode with no way back for
+//      the rest of the session. A real pointerdown/pointermove event's
+//      pointerType can't lie about what's actually being used, whenever it
+//      arrives, so there's no reason to ever stop listening.
 const uaMobile = navigator.userAgentData
   ? navigator.userAgentData.mobile
   : /Mobi|Android|iPhone|iPad|iPod|Silk|Windows Phone/i.test(navigator.userAgent);
@@ -1803,37 +1811,30 @@ const hasFinePointer = matchMedia('(pointer: fine)').matches
 const primaryPointerCoarse = matchMedia('(pointer: coarse)').matches;
 let isTouch = hasFinePointer ? false
   : uaMobile ? true
-  : (primaryPointerCoarse && (navigator.maxTouchPoints || 0) > 0);  // ambiguous — needs runtime check
+  : (primaryPointerCoarse && (navigator.maxTouchPoints || 0) > 0);
 
-// If clearly mobile UA, show mobile UI immediately
-if (uaMobile && !hasFinePointer){
-  document.getElementById('mobile').style.display = 'block';
-} else if (isTouch){
-  // Ambiguous (touch-primary desktop) — defer: wait 600ms for a mouse signal
-  let resolved = false;
-  const mouseProbe = (e) => {
-    if (e.movementX !== 0 || e.movementY !== 0){
-      resolved = true;
-      isTouch = false;
-      removeEventListener('mousemove', mouseProbe);
-      console.log('[input] mouse detected during probe window — desktop mode');
-    }
-  };
-  addEventListener('mousemove', mouseProbe);
-  setTimeout(() => {
-    removeEventListener('mousemove', mouseProbe);
-    if (!resolved){
-      // No mouse detected — commit to touch mode
-      document.getElementById('mobile').style.display = 'block';
-      console.log('[input] no mouse detected within 600ms — touch mode');
-    }
-  }, 600);
-}
+if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
   '| hover:', matchMedia('(hover: hover)').matches,
   '| maxTouch:', navigator.maxTouchPoints);
+
+function setTouchMode(touch){
+  if (touch === isTouch) return;
+  isTouch = touch;
+  document.getElementById('mobile').style.display = isTouch ? 'block' : 'none';
+  document.getElementById('vslide').style.display = (isTouch && mode==='fly') ? 'flex' : 'none';
+  setHudCollapsed(isTouch);
+  console.log('[input] corrected isTouch ->', isTouch, 'from a live', touch ? 'touch/pen' : 'mouse', 'event');
+}
+addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse') setTouchMode(false);
+  else if (e.pointerType === 'touch' || e.pointerType === 'pen') setTouchMode(true);
+}, { passive:true });
+addEventListener('pointermove', e => {
+  if (e.pointerType === 'mouse') setTouchMode(false);
+}, { passive:true });
 
 /* ============================== collapsible HUD ============================== */
 const hud = document.getElementById('hud');
