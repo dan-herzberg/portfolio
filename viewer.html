@@ -1641,9 +1641,31 @@ const uaMobile = navigator.userAgentData
   ? navigator.userAgentData.mobile
   : /Mobi|Android|iPhone|iPad|iPod|Silk|Windows Phone/i.test(navigator.userAgent);
 const primaryPointerCoarse = matchMedia('(pointer: coarse)').matches;
-const isTouch = uaMobile || (primaryPointerCoarse && (navigator.maxTouchPoints || 0) > 0);
+let isTouch = uaMobile || (primaryPointerCoarse && (navigator.maxTouchPoints || 0) > 0);
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
+
+// The heuristic above is a best-effort first guess and can still be wrong -
+// some hybrid/touch-capable Windows machines have been observed reporting
+// pointer:coarse as the PRIMARY pointer even while the user is actually
+// driving the page with a real mouse. Self-correct at runtime from
+// whichever input genuinely arrives first: a real pointerdown/pointermove
+// event's pointerType can't lie about what's actually being used, unlike a
+// media-query heuristic.
+function setTouchMode(touch){
+  if (touch === isTouch) return;
+  isTouch = touch;
+  document.getElementById('mobile').style.display = isTouch ? 'block' : 'none';
+  document.getElementById('vslide').style.display = (isTouch && mode==='fly') ? 'flex' : 'none';
+  setHudCollapsed(isTouch);
+}
+addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse') setTouchMode(false);
+  else if (e.pointerType === 'touch' || e.pointerType === 'pen') setTouchMode(true);
+}, { passive:true });
+addEventListener('pointermove', e => {
+  if (e.pointerType === 'mouse') setTouchMode(false);
+}, { passive:true });
 
 /* ============================== collapsible HUD ============================== */
 const hud = document.getElementById('hud');
