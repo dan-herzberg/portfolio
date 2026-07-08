@@ -238,6 +238,17 @@ Edit mode + AI run on flat screens only.
   <div id="aiSettings" style="display:none;margin-top:6px;">
     <div class="row"><input id="aiKey" type="password" placeholder="Anthropic API key (memory only)"/></div>
     <div class="row" style="margin-top:6px;"><input id="aiModel" value="claude-sonnet-4-6"/></div>
+    <div style="margin-top:8px;font-size:11px;color:var(--dim);line-height:1.6;">
+      Your key is stored in memory only and cleared on refresh.<br>
+      To get a key:
+      <ol style="margin:4px 0 4px 16px;padding:0;">
+        <li>Go to <a href="https://console.anthropic.com" target="_blank" rel="noopener" style="color:var(--accent);">console.anthropic.com</a></li>
+        <li>Create an account and add billing credits<br><span style="color:var(--dim);font-size:10px;">(Settings → Billing → Buy credits)</span></li>
+        <li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent);">Settings → API Keys</a> → Create Key</li>
+        <li>Paste the key above <span style="color:var(--dim);font-size:10px;">(starts with sk-ant-…)</span></li>
+      </ol>
+      Commands cost fractions of a cent each.
+    </div>
   </div>
 </div>
 
