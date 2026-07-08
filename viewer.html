@@ -879,17 +879,32 @@ function makeSwitch(node, isButton){
   node.userData.noGrab = true;
   const path = nodePath(node, loadedRoot);
   cloneMaterials(node);
+  node.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(node);
   const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
   if (isButton === undefined) isButton = /button|btn/i.test(node.name);
+
+  // Wrap in a pivot at the bounding-box center so scale animations
+  // compress symmetrically inward regardless of the node's CAD origin.
+  const parent = node.parent;
+  const pivot = new THREE.Group();
+  pivot.name = node.name + '__btnpivot';
+  pivot.userData.noGrab = true;
+  parent.add(pivot);
+  pivot.position.copy(parent.worldToLocal(center.clone()));
+  pivot.updateMatrixWorld(true);
+  pivot.attach(node);
+
   const inter = {
     kind:'switch', label: node.name || 'switch', path,
-    node, isButton,
+    node: pivot,   // animate the pivot, not the raw node
+    isButton,
     on:false, anim:0, animT:0,
-    baseScale: node.scale.clone(),
-    baseRot: node.rotation.clone(),
+    baseScale: pivot.scale.clone(),
+    baseRot: pivot.rotation.clone(),
     pressAxis: (size.x <= size.y && size.x <= size.z) ? 'x' : (size.y <= size.z ? 'y' : 'z'),
-    worldPos: box.getCenter(new THREE.Vector3())
+    worldPos: center
   };
   interactables.push(inter);
   markMeshes(node, 'inter', inter, interactMeshes);
