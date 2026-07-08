@@ -224,6 +224,7 @@ Edit mode + AI run on flat screens only.
   </div>
   <div class="row" style="margin-top:8px;">
     <button id="editClose">Close</button>
+    <button id="editDelete" style="color:#e05252;border-color:#5a2020;">Delete part</button>
   </div>
 </div>
 
@@ -453,7 +454,7 @@ const WELD_COOLDOWN_MS = 1500; // no auto re-weld right after pulling a componen
 const HOLD_HISTORY_MS = 150;   // window used to derive throw velocity from recent hold motion
 const MAX_THROW_SPEED = 8;     // m/s cap on release velocity derived from hold history
 const MAX_THROW_ANGSPEED = 20; // rad/s cap on release angular velocity
-let overrides = { roles:{}, settings:{} };   // roles: path -> {role, hinge}
+let overrides = { roles:{}, settings:{}, deleted:[] };   // roles: path -> {role, hinge}; deleted: [path]
 let lastSource = null;                       // {kind:'glb', buffer, label} | {kind:'demo'}
 let loadedRoot = null;
 let pathIndex = new Map();                   // path -> node (built before door reparenting)
@@ -738,6 +739,7 @@ function buildWorld(root, label, keepPlayer=false){
     document.getElementById('simplifySlider').value = 0;
     document.getElementById('simplifyPct').textContent = '0%';
     suppressedPaths = new Set();  // fresh load clears suppression
+    overrides.deleted = [];       // fresh load clears manual deletions
   }
   updateStats();
   if (forceOpaque) setForceOpaque(true);
@@ -820,6 +822,14 @@ function classify(root){
   // dispose suppressed parts (simplification slider)
   if (suppressedPaths.size > 0){
     for (const path of suppressedPaths){
+      const node = pathIndex.get(path);
+      if (node) disposeNode(node);
+    }
+  }
+
+  // dispose manually deleted parts (persists in overrides.deleted)
+  if (overrides.deleted && overrides.deleted.length > 0){
+    for (const path of overrides.deleted){
       const node = pathIndex.get(path);
       if (node) disposeNode(node);
     }
@@ -1682,6 +1692,17 @@ document.getElementById('editLock').onclick = () => {
   rebuildWorld();
 };
 document.getElementById('editClose').onclick = closeEditor;
+document.getElementById('editDelete').onclick = () => {
+  if (!editTarget) return;
+  // Store path so we can suppress it through rebuilds
+  if (!overrides.deleted) overrides.deleted = [];
+  const path = editPath;
+  if (!overrides.deleted.includes(path)) overrides.deleted.push(path);
+  // Dispose and remove immediately — no rebuild needed
+  disposeNode(editTarget);
+  closeEditor();
+  toast('Deleted ' + (editTarget.name || path));
+};
 
 /* ============================== overrides file i/o ============================== */
 document.getElementById('btnExport').onclick = () => {
@@ -1706,7 +1727,7 @@ function importOverrides(text, name){
   try {
     const data = JSON.parse(text);
     if (!data.roles && !data.settings) throw new Error('missing roles/settings keys');
-    overrides = { roles: data.roles || {}, settings: data.settings || {} };
+    overrides = { roles: data.roles || {}, settings: data.settings || {}, deleted: data.deleted || [] };
     applyOverrideSettings();
     toast('Imported ' + name + ' (' + Object.keys(overrides.roles).length + ' role edits)');
     if (lastSource) rebuildWorld();
