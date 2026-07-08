@@ -1756,10 +1756,11 @@ function applyOps(ops){
 
 /* ============================== desktop input ============================== */
 // Device detection: determine input mode.
-// Some Windows touchscreen desktops report (pointer: coarse) as primary and
-// (any-pointer: fine) = false even with a mouse connected. The (hover: hover)
-// query is the most reliable fallback: a mouse always supports hover, a finger
-// never does. If any input device can hover, treat this as a desktop.
+// Some Windows touchscreen desktops report all pointer/hover media queries as
+// coarse/none even with a mouse connected. Static detection fails completely.
+// Strategy: start in touch mode if queries say coarse, but IMMEDIATELY flip to
+// desktop mode the first time a real mousemove fires (touch never generates
+// mousemove with movementX/Y != 0).
 const uaMobile = navigator.userAgentData
   ? navigator.userAgentData.mobile
   : /Mobi|Android|iPhone|iPad|iPod|Silk|Windows Phone/i.test(navigator.userAgent);
@@ -1767,8 +1768,25 @@ const hasFinePointer = matchMedia('(pointer: fine)').matches
   || matchMedia('(any-pointer: fine)').matches
   || matchMedia('(hover: hover)').matches;
 const primaryPointerCoarse = matchMedia('(pointer: coarse)').matches;
-const isTouch = uaMobile && !hasFinePointer
+let isTouch = uaMobile && !hasFinePointer
   || (primaryPointerCoarse && !hasFinePointer && (navigator.maxTouchPoints || 0) > 0);
+
+// Runtime mouse detection: if a real mouse event fires, switch to desktop mode
+if (isTouch){
+  const mouseProbe = (e) => {
+    // Real mouse moves have movementX/Y; touch-emulated ones don't
+    if (e.movementX !== 0 || e.movementY !== 0){
+      isTouch = false;
+      document.getElementById('mobile').style.display = 'none';
+      setHudCollapsed(false);
+      removeEventListener('mousemove', mouseProbe);
+      toast('Mouse detected — switched to desktop mode');
+      console.log('[input] runtime mouse detected, switching to desktop mode');
+    }
+  };
+  addEventListener('mousemove', mouseProbe);
+}
+
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
 console.log('[input] isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
