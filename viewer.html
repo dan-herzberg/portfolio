@@ -1758,9 +1758,9 @@ function applyOps(ops){
 // Device detection: determine input mode.
 // Some Windows touchscreen desktops report all pointer/hover media queries as
 // coarse/none even with a mouse connected. Static detection fails completely.
-// Strategy: start in touch mode if queries say coarse, but IMMEDIATELY flip to
-// desktop mode the first time a real mousemove fires (touch never generates
-// mousemove with movementX/Y != 0).
+// Strategy: if queries are ambiguous (coarse but not confirmed mobile UA),
+// defer showing mobile UI for 600ms — if a mouse moves in that window, skip
+// mobile entirely. True phones/tablets show mobile UI immediately (uaMobile).
 const uaMobile = navigator.userAgentData
   ? navigator.userAgentData.mobile
   : /Mobi|Android|iPhone|iPad|iPod|Silk|Windows Phone/i.test(navigator.userAgent);
@@ -1768,28 +1768,36 @@ const hasFinePointer = matchMedia('(pointer: fine)').matches
   || matchMedia('(any-pointer: fine)').matches
   || matchMedia('(hover: hover)').matches;
 const primaryPointerCoarse = matchMedia('(pointer: coarse)').matches;
-let isTouch = uaMobile && !hasFinePointer
-  || (primaryPointerCoarse && !hasFinePointer && (navigator.maxTouchPoints || 0) > 0);
+let isTouch = hasFinePointer ? false
+  : uaMobile ? true
+  : (primaryPointerCoarse && (navigator.maxTouchPoints || 0) > 0);  // ambiguous — needs runtime check
 
-// Runtime mouse detection: if a real mouse event fires, switch to desktop mode
-if (isTouch){
+// If clearly mobile UA, show mobile UI immediately
+if (uaMobile && !hasFinePointer){
+  document.getElementById('mobile').style.display = 'block';
+} else if (isTouch){
+  // Ambiguous (touch-primary desktop) — defer: wait 600ms for a mouse signal
+  let resolved = false;
   const mouseProbe = (e) => {
-    // Real mouse moves have movementX/Y; touch-emulated ones don't
     if (e.movementX !== 0 || e.movementY !== 0){
+      resolved = true;
       isTouch = false;
-      document.getElementById('mobile').style.display = 'none';
-      setHudCollapsed(false);
       removeEventListener('mousemove', mouseProbe);
-      toast('Mouse detected — switched to desktop mode');
-      console.log('[input] runtime mouse detected, switching to desktop mode');
+      console.log('[input] mouse detected during probe window — desktop mode');
     }
   };
   addEventListener('mousemove', mouseProbe);
+  setTimeout(() => {
+    removeEventListener('mousemove', mouseProbe);
+    if (!resolved){
+      // No mouse detected — commit to touch mode
+      document.getElementById('mobile').style.display = 'block';
+      console.log('[input] no mouse detected within 600ms — touch mode');
+    }
+  }, 600);
 }
-
-if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-console.log('[input] isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
+console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
   '| hover:', matchMedia('(hover: hover)').matches,
   '| maxTouch:', navigator.maxTouchPoints);
@@ -1802,8 +1810,8 @@ function setHudCollapsed(collapsed){
   hudToggle.innerHTML = collapsed ? '&#9654;' : '&#9664;';
 }
 hudToggle.onclick = () => setHudCollapsed(!hud.classList.contains('collapsed'));
-// mobile screens are cramped, so start collapsed there
-setHudCollapsed(isTouch);
+// mobile screens are cramped, so start collapsed there; ambiguous desktops start expanded
+setHudCollapsed(uaMobile && !hasFinePointer);
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
