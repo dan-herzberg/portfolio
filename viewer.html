@@ -2140,8 +2140,161 @@ function rayFrom(c){
   return ray;
 }
 function onVRTrigger(c){
+  // If wrist menu is open, check if we're clicking a menu button first
+  if (vrMenu.visible){
+    const r = rayFrom(c); r.far = 2;
+    const hits = r.intersectObjects(vrMenu.buttons, false);
+    if (hits.length > 0){
+      const btn = hits[0].object;
+      if (btn.userData.vrMenuAction) btn.userData.vrMenuAction();
+      return;
+    }
+  }
   c.getWorldPosition(tmpV3);
   tryInteract(rayFrom(c), tmpV3.clone());
+}
+
+/* ============================== VR wrist menu ============================== */
+const vrMenu = { group: new THREE.Group(), visible: false, buttons: [], targetPath: null, targetNode: null };
+vrMenu.group.visible = false;
+scene.add(vrMenu.group);
+
+function buildVRMenuButtons(){
+  // Clear old buttons
+  while (vrMenu.group.children.length) vrMenu.group.remove(vrMenu.group.children[0]);
+  vrMenu.buttons = [];
+
+  const roles = ['door','switch','button','grabbable','static','light'];
+  const extras = ['flip hinge','flip swing','lock','delete'];
+  const allItems = [...roles, '---', ...extras];
+  const btnW = 0.12, btnH = 0.04, gap = 0.006;
+  let y = 0;
+
+  // Title showing current part name
+  const titleGeo = new THREE.PlaneGeometry(btnW * 2 + gap, btnH);
+  const titleMat = new THREE.MeshBasicMaterial({ color: 0x1a1e26, transparent: true, opacity: 0.9 });
+  const titleMesh = new THREE.Mesh(titleGeo, titleMat);
+  titleMesh.position.set(0, y, 0);
+  vrMenu.group.add(titleMesh);
+  vrMenu.titleMesh = titleMesh;
+  y -= btnH + gap;
+
+  for (const item of allItems){
+    if (item === '---'){ y -= gap * 2; continue; }
+
+    const isRole = roles.includes(item);
+    const geo = new THREE.PlaneGeometry(btnW, btnH);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x1b2230, transparent: true, opacity: 0.85 });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    // Position in 2-column grid
+    const col = (vrMenu.buttons.length % 2);
+    if (col === 0 && vrMenu.buttons.length > 0) y -= btnH + gap;
+    mesh.position.set(col === 0 ? -(btnW/2 + gap/2) : (btnW/2 + gap/2), y, 0);
+
+    mesh.userData.vrMenuAction = () => {
+      if (!vrMenu.targetPath) return;
+      if (isRole){
+        setRoleOverride(vrMenu.targetPath, item);
+        toast(vrMenu.targetNode.name + ' → ' + item);
+      } else if (item === 'flip hinge'){
+        const prev = overrides.roles[vrMenu.targetPath] || { role:'door', hinge:'left' };
+        prev.role = 'door'; prev.hinge = prev.hinge === 'right' ? 'left' : 'right';
+        overrides.roles[vrMenu.targetPath] = prev;
+        toast('Hinge: ' + prev.hinge); rebuildWorld();
+      } else if (item === 'flip swing'){
+        const prev = overrides.roles[vrMenu.targetPath] || { role:'door', hinge:'left' };
+        prev.role = 'door'; prev.swingInward = !prev.swingInward;
+        overrides.roles[vrMenu.targetPath] = prev;
+        toast(prev.swingInward ? 'Swing: toward' : 'Swing: away'); rebuildWorld();
+      } else if (item === 'lock'){
+        const prev = overrides.roles[vrMenu.targetPath] || { role:'door', hinge:'left' };
+        prev.role = 'door'; prev.locked = !prev.locked;
+        overrides.roles[vrMenu.targetPath] = prev;
+        toast(prev.locked ? 'Locked' : 'Unlocked'); rebuildWorld();
+      } else if (item === 'delete'){
+        if (!overrides.deleted) overrides.deleted = [];
+        if (!overrides.deleted.includes(vrMenu.targetPath)) overrides.deleted.push(vrMenu.targetPath);
+        if (vrMenu.targetNode) disposeNode(vrMenu.targetNode);
+        toast('Deleted'); hideVRWristMenu();
+      }
+      updateVRMenuHighlights();
+    };
+
+    // Label as a small text sprite
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#cfd6e2'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(item, 64, 22);
+    const tex = new THREE.CanvasTexture(canvas);
+    const labelGeo = new THREE.PlaneGeometry(btnW * 0.9, btnH * 0.8);
+    const labelMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    const label = new THREE.Mesh(labelGeo, labelMat);
+    label.position.z = 0.001;
+    mesh.add(label);
+    mesh.userData.menuLabel = item;
+
+    vrMenu.group.add(mesh);
+    vrMenu.buttons.push(mesh);
+  }
+
+  // Background panel
+  const bgH = Math.abs(y) + btnH + gap * 4;
+  const bgGeo = new THREE.PlaneGeometry(btnW * 2 + gap * 4, bgH);
+  const bgMat = new THREE.MeshBasicMaterial({ color: 0x101318, transparent: true, opacity: 0.92 });
+  const bg = new THREE.Mesh(bgGeo, bgMat);
+  bg.position.set(0, -bgH/2 + btnH/2 + gap, -0.002);
+  vrMenu.group.add(bg);
+}
+buildVRMenuButtons();
+
+function updateVRMenuHighlights(){
+  if (!vrMenu.targetPath) return;
+  const curRole = vrMenu.targetNode ? currentRole(vrMenu.targetNode) : 'static';
+  for (const btn of vrMenu.buttons){
+    const label = btn.userData.menuLabel;
+    const isActive = label === curRole;
+    btn.material.color.setHex(isActive ? 0xe0a43c : 0x1b2230);
+  }
+}
+
+function toggleVRWristMenu(){
+  if (vrMenu.visible){ hideVRWristMenu(); return; }
+  // Determine target: aimed part from right controller
+  const rc = controllers[1] || controllers[0];
+  const r = rayFrom(rc); r.far = 8;
+  const meshes = [];
+  if (worldRoot) worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
+  const h = firstHit(r.intersectObjects(meshes, false));
+  if (!h){ toast('Aim at a part, then press Y'); return; }
+  const chain = buildEditChain(h.object);
+  if (!chain.length){ toast('No named part to edit'); return; }
+  vrMenu.targetNode = chain[0];
+  vrMenu.targetPath = pathFor(chain[0]);
+
+  // Position menu in front of left controller, facing the user
+  const lc = controllers[0] || controllers[1];
+  lc.updateMatrixWorld(true);
+  vrMenu.group.position.setFromMatrixPosition(lc.matrixWorld);
+  vrMenu.group.position.y += 0.15;
+  // Face the camera
+  camera.getWorldPosition(tmpV);
+  vrMenu.group.lookAt(tmpV);
+
+  vrMenu.group.visible = true;
+  vrMenu.visible = true;
+  updateVRMenuHighlights();
+  setEditHighlight(vrMenu.targetNode);
+  toast('Editing: ' + vrMenu.targetNode.name);
+}
+
+function hideVRWristMenu(){
+  vrMenu.group.visible = false;
+  vrMenu.visible = false;
+  vrMenu.targetPath = null;
+  vrMenu.targetNode = null;
+  clearEditHighlight();
 }
 const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false,
   editBtn:false, aDown:0, xDown:0, stickFwdTele:false };
@@ -2181,28 +2334,10 @@ function pollXRInput(dt){
       }
       xrLatch.resetBtn = !!x?.pressed;
 
-      // Y button: edit aimed part (like T key)
+      // Y button: toggle wrist menu for editing aimed part
       const y = gp.buttons[5];
       if (y?.pressed && !xrLatch.editBtn){
-        // In VR, open editor for aimed part via raycast from right controller
-        const rc = controllers[1] || controllers[0];
-        const r = rayFrom(rc); r.far = 8;
-        const meshes = [];
-        if (worldRoot) worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
-        const h = firstHit(r.intersectObjects(meshes, false));
-        if (h){
-          editChain = buildEditChain(h.object);
-          if (editChain.length){
-            editChainIdx = 0;
-            editTarget = editChain[0];
-            editPath = pathFor(editTarget);
-            // In VR we can't show the DOM panel, but we can cycle roles
-            const curRole = currentRole(editTarget);
-            const nextIdx = (ROLES.indexOf(curRole) + 1) % ROLES.length;
-            setRoleOverride(editPath, ROLES[nextIdx]);
-            toast(editTarget.name + ' → ' + ROLES[nextIdx]);
-          }
-        } else { toast('Aim at a part and press Y to cycle role'); }
+        toggleVRWristMenu();
       }
       xrLatch.editBtn = !!y?.pressed;
 
