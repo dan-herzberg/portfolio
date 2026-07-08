@@ -215,6 +215,7 @@ Edit mode + AI run on flat screens only.
   <div class="row" id="editRoles"></div>
   <div class="row" style="margin-top:8px;">
     <button id="editHinge">Flip hinge</button>
+    <button id="editSwing">Flip swing</button>
     <button id="editLock">Lock</button>
   </div>
   <div id="editColorRow">
@@ -884,8 +885,10 @@ function makeDoor(node, hinge='left', locked=false){
   pivot.attach(node);
 
   const center = box.getCenter(new THREE.Vector3());
+  const ov = overrides.roles[path];
   const inter = {
     kind:'door', label: node.name || 'door', path, hinge, locked,
+    swingInward: !!(ov && ov.swingInward),
     node, pivot,
     hingeWorld: hingeV.clone(),
     centerWorld: center,
@@ -1143,11 +1146,12 @@ function activate(inter, fromPos){
     if (inter.locked){ toast('Locked: ' + inter.label); return; }
     inter.open = !inter.open;
     if (inter.open){
-      // swing away from the activator
+      // swing away from the activator by default; swingInward inverts this
       const leafDir = tmpV.copy(inter.centerWorld).sub(inter.hingeWorld); leafDir.y = 0; leafDir.normalize();
       const tipMove = tmpV2.crossVectors(UP, leafDir);
       const toUser = tmpV3.copy(fromPos).sub(inter.centerWorld); toUser.y = 0;
-      const sign = tipMove.dot(toUser) > 0 ? -1 : 1;
+      let sign = tipMove.dot(toUser) > 0 ? -1 : 1;
+      if (inter.swingInward) sign = -sign;
       inter.target = sign * 1.78;   // ~102 deg
     } else inter.target = 0;
     toast((inter.open?'Opened ':'Closed ') + inter.label);
@@ -1586,11 +1590,14 @@ function renderEditor(){
 
   // Door-specific controls
   document.getElementById('editHinge').style.display = role==='door' ? '' : 'none';
+  document.getElementById('editSwing').style.display = role==='door' ? '' : 'none';
   const lockBtn = document.getElementById('editLock');
   lockBtn.style.display = role==='door' ? '' : 'none';
   if (role==='door'){
     const existing = findInterFor(editTarget);
     lockBtn.classList.toggle('on', !!(existing && existing.locked));
+    const ov = overrides.roles[editPath];
+    document.getElementById('editSwing').classList.toggle('on', !!(ov && ov.swingInward));
   }
 
   // Color controls — always shown
@@ -1689,6 +1696,14 @@ document.getElementById('editLock').onclick = () => {
   prev.locked = !(existing ? existing.locked : prev.locked);
   overrides.roles[editPath] = prev;
   toast(prev.locked ? 'Locked' : 'Unlocked');
+  rebuildWorld();
+};
+document.getElementById('editSwing').onclick = () => {
+  const prev = overrides.roles[editPath] || { role:'door', hinge:'left' };
+  prev.role = 'door';
+  prev.swingInward = !prev.swingInward;
+  overrides.roles[editPath] = prev;
+  toast(prev.swingInward ? 'Swing: toward you' : 'Swing: away from you');
   rebuildWorld();
 };
 document.getElementById('editClose').onclick = closeEditor;
