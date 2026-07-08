@@ -86,7 +86,9 @@
   #vslide{position:fixed;right:110px;bottom:70px;z-index:10;display:none;flex-direction:column;gap:8px;}
 
   #editPanel{position:fixed;left:50%;top:16%;transform:translateX(-50%);width:min(360px,92vw);
-    z-index:12;display:none;max-height:70vh;overflow-y:auto;}
+    z-index:12;display:none;max-height:70vh;overflow-y:auto;cursor:default;}
+  #editPanel .drag-handle{cursor:grab;user-select:none;display:flex;justify-content:space-between;align-items:center;}
+  #editPanel .drag-handle:active{cursor:grabbing;}
   #editPanel button{font-size:12px;padding:7px 8px;}
   #editTree{margin-bottom:8px;font-size:11px;line-height:1.6;}
   #editTree .tree-node{padding:2px 4px;border-radius:4px;cursor:pointer;color:var(--dim);
@@ -204,7 +206,10 @@ Edit mode + AI run on flat screens only.
 <button id="aiBtn">AI</button>
 
 <div id="editPanel" class="panel">
-  <div class="label">Edit part</div>
+  <div class="drag-handle" id="editDragHandle">
+    <div class="label" style="margin:0;">Edit part</div>
+    <span style="font-size:10px;color:var(--dim);">⋮⋮ drag</span>
+  </div>
   <div id="editTree"></div>
   <div id="editName" class="mono" style="font-size:12px;margin-bottom:8px;color:var(--accent);"></div>
   <div class="row" id="editRoles"></div>
@@ -1417,6 +1422,25 @@ function openEditor(){
 function closeEditor(){
   editPanel.style.display = 'none';
   clearEditHighlight();
+}
+// Drag-to-move for the edit panel
+{
+  const handle = document.getElementById('editDragHandle');
+  let dragging = false, offX = 0, offY = 0;
+  handle.addEventListener('pointerdown', e => {
+    dragging = true; offX = e.clientX - editPanel.offsetLeft; offY = e.clientY - editPanel.offsetTop;
+    // Remove centering transform so left/top work correctly
+    editPanel.style.transform = 'none';
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    editPanel.style.left = Math.max(0, e.clientX - offX) + 'px';
+    editPanel.style.top = Math.max(0, e.clientY - offY) + 'px';
+  });
+  handle.addEventListener('pointerup', () => dragging = false);
+  handle.addEventListener('pointercancel', () => dragging = false);
 }
 function clearEditHighlight(){
   if (editHighlight){
