@@ -1067,15 +1067,19 @@ function makeLight(node){
   const box = new THREE.Box3().setFromObject(node);
   const centerWorld = box.isEmpty() ? node.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
 
-  // emit the part's own color rather than a fixed warm-white, so a red part
-  // casts red light and so on
+  // emit the part's own color — prefer override color, then material color, then warm-white fallback
   let color = new THREE.Color(0xfff2cc);
-  let foundColor = false;
-  node.traverse(o => {
-    if (foundColor || !o.isMesh || !o.material) return;
-    const m = Array.isArray(o.material) ? o.material[0] : o.material;
-    if (m && m.color){ color = m.color.clone(); foundColor = true; }
-  });
+  const ovColor = overrides.roles[path] && overrides.roles[path].color;
+  if (ovColor){
+    color = new THREE.Color(ovColor);
+  } else {
+    let foundColor = false;
+    node.traverse(o => {
+      if (foundColor || !o.isMesh || !o.material) return;
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      if (m && m.color){ color = m.color.clone(); foundColor = true; }
+    });
+  }
 
   const light = new THREE.PointLight(color, 8, 10);
   light.position.copy(node.worldToLocal(centerWorld.clone()));
@@ -1601,10 +1605,16 @@ function applyColor(hex){
 function applyColorToNode(node, hex){
   const color = new THREE.Color(hex);
   node.traverse(o => {
+    if (o.isLight && o.isPointLight){
+      // update light color to match new part color
+      o.color.copy(color);
+    }
     if (!o.isMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats){
       if (m.color) m.color.copy(color);
+      // if this mesh is a light source, also update its emissive
+      if (m.emissive && m.emissiveIntensity > 0) m.emissive.copy(color);
     }
   });
 }
