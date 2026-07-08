@@ -1756,15 +1756,16 @@ function applyOps(ops){
 
 /* ============================== desktop input ============================== */
 // Device detection: determine input mode.
-// A touchscreen laptop with a mouse attached must read as desktop.
-// pointer:fine = mouse/trackpad is the primary input (most reliable signal)
-// pointer:coarse = finger is primary input (phone/tablet)
-// For ambiguous cases (touch-enabled Windows laptop), prefer desktop if a
-// fine pointer is available at all (pointer:fine OR any-pointer:fine).
+// Some Windows touchscreen desktops report (pointer: coarse) as primary and
+// (any-pointer: fine) = false even with a mouse connected. The (hover: hover)
+// query is the most reliable fallback: a mouse always supports hover, a finger
+// never does. If any input device can hover, treat this as a desktop.
 const uaMobile = navigator.userAgentData
   ? navigator.userAgentData.mobile
   : /Mobi|Android|iPhone|iPad|iPod|Silk|Windows Phone/i.test(navigator.userAgent);
-const hasFinePointer = matchMedia('(pointer: fine)').matches || matchMedia('(any-pointer: fine)').matches;
+const hasFinePointer = matchMedia('(pointer: fine)').matches
+  || matchMedia('(any-pointer: fine)').matches
+  || matchMedia('(hover: hover)').matches;
 const primaryPointerCoarse = matchMedia('(pointer: coarse)').matches;
 const isTouch = uaMobile && !hasFinePointer
   || (primaryPointerCoarse && !hasFinePointer && (navigator.maxTouchPoints || 0) > 0);
@@ -1772,6 +1773,7 @@ if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
 console.log('[input] isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
+  '| hover:', matchMedia('(hover: hover)').matches,
   '| maxTouch:', navigator.maxTouchPoints);
 
 /* ============================== collapsible HUD ============================== */
