@@ -151,7 +151,7 @@
         <input type="range" id="flySpeedSlider" min="1" max="30" step="0.5" value="6.5" style="flex:1;min-width:80px;">
       </div>
     </div>
-    <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded</div>
+    <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded<br><span id="buildVer" style="color:var(--dim);font-size:10px;"></span></div>
     <div class="panel">
       <div class="label">Simplify (hide smallest parts)</div>
       <div class="row" style="align-items:center;">
@@ -620,7 +620,9 @@ btnLoad.onclick = e => {
   if (!loadMenu.classList.contains('open')) positionLoadMenu();
   loadMenu.classList.toggle('open');
 };
-addEventListener('click', () => loadMenu.classList.remove('open'));
+addEventListener('click', e => {
+  if (!loadMenu.contains(e.target) && e.target !== btnLoad) loadMenu.classList.remove('open');
+});
 document.getElementById('btnLoadFile').onclick = () => document.getElementById('file').click();
 document.getElementById('file').onchange = e => { if (e.target.files[0]) readFile(e.target.files[0]); };
 addEventListener('dragover', e=>{ e.preventDefault(); document.getElementById('drop').style.display='flex'; });
@@ -1957,6 +1959,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
+document.getElementById('buildVer').textContent = 'build 2025-07-08.1';
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
   '| hover:', matchMedia('(hover: hover)').matches,
