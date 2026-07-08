@@ -1574,7 +1574,23 @@ function clearColor(){
   rebuildWorld();
   toast('Color cleared');
 }
-document.getElementById('editColorPicker').onchange = e => applyColor(e.target.value);
+// Color picker: apply only on final selection (debounced input + change fallback)
+{
+  const picker = document.getElementById('editColorPicker');
+  let colorTimeout = null;
+  picker.addEventListener('input', e => {
+    // Preview color live on the node (visual only, no save)
+    if (editTarget) applyColorToNode(editTarget, e.target.value);
+    // Debounce: commit after user stops dragging for 300ms
+    clearTimeout(colorTimeout);
+    colorTimeout = setTimeout(() => applyColor(e.target.value), 300);
+  });
+  picker.addEventListener('change', e => {
+    // Fires on dialog close / final selection — commit immediately
+    clearTimeout(colorTimeout);
+    applyColor(e.target.value);
+  });
+}
 document.getElementById('editColorClear').onclick = clearColor;
 
 function setRoleOverride(path, role, hinge){
