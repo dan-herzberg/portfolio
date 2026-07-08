@@ -2140,7 +2140,24 @@ function rayFrom(c){
   return ray;
 }
 function onVRTrigger(c){
-  // If wrist menu is open, check if we're clicking a menu button first
+  // If watch menu is open, check if we're clicking a watch button
+  if (vrWatch.visible){
+    const r = rayFrom(c); r.far = 1.5;
+    const hits = r.intersectObjects(vrWatch.buttons, false);
+    if (hits.length > 0){
+      const btn = hits[0].object;
+      if (btn.userData.isSlider){
+        // Slider interaction: map hit point X to 0-1 range
+        const local = btn.worldToLocal(hits[0].point.clone());
+        const pct = THREE.MathUtils.clamp((local.x + vrWatch.sliderParts.trackW/2) / vrWatch.sliderParts.trackW, 0, 1);
+        updateVRWatchSlider(pct);
+      } else if (btn.userData.vrWatchAction){
+        btn.userData.vrWatchAction();
+      }
+      return;
+    }
+  }
+  // If edit wrist menu is open, check if we're clicking a menu button
   if (vrMenu.visible){
     const r = rayFrom(c); r.far = 2;
     const hits = r.intersectObjects(vrMenu.buttons, false);
@@ -2295,6 +2312,243 @@ function hideVRWristMenu(){
   vrMenu.targetPath = null;
   vrMenu.targetNode = null;
   clearEditHighlight();
+}
+
+/* ============================== VR watch menu (gaze-activated) ============================== */
+const vrWatch = { group: new THREE.Group(), visible: false, buttons: [], sliderParts: null,
+  activateTimer: 0, activeHand: null };
+vrWatch.group.visible = false;
+scene.add(vrWatch.group);
+
+function createVRWatchMenu(){
+  const W = 0.22, btnH = 0.032, gap = 0.005, cols = 2;
+  const btnW = (W - gap * 3) / cols;
+  let y = 0;
+
+  function addLabel(text){
+    const c = document.createElement('canvas'); c.width = 256; c.height = 24;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#7d8798'; ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(text, 4, 16);
+    const tex = new THREE.CanvasTexture(c);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(W, 0.018),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+    m.position.set(0, y, 0.001);
+    vrWatch.group.add(m);
+    y -= 0.022;
+  }
+
+  function addButton(text, action, colIdx, sameLine){
+    if (!sameLine) { /* new row handled by caller */ }
+    const geo = new THREE.PlaneGeometry(btnW, btnH);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x1b2230, transparent: true, opacity: 0.85 });
+    const mesh = new THREE.Mesh(geo, mat);
+    const xPos = colIdx === 0 ? -(btnW/2 + gap/2) : (btnW/2 + gap/2);
+    mesh.position.set(xPos, y, 0.001);
+    // Label
+    const c = document.createElement('canvas'); c.width = 128; c.height = 28;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#cfd6e2'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(text, 64, 19);
+    const tex = new THREE.CanvasTexture(c);
+    const lbl = new THREE.Mesh(new THREE.PlaneGeometry(btnW * 0.9, btnH * 0.75),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+    lbl.position.z = 0.001;
+    mesh.add(lbl);
+    mesh.userData.vrWatchAction = action;
+    mesh.userData.watchLabel = text;
+    vrWatch.group.add(mesh);
+    vrWatch.buttons.push(mesh);
+    return mesh;
+  }
+
+  function nextRow(){ y -= btnH + gap; }
+
+  // === SCENE section ===
+  addLabel('SCENE');
+  addButton('Load File', () => {
+    // Can't open a file picker in VR, but we can trigger it on exit
+    toast('Exit VR to load a file (file picker requires browser UI)');
+  }, 0);
+  addButton('Demo Room', () => {
+    document.getElementById('btnDemo').click();
+    toast('Loading demo room');
+  }, 1);
+  nextRow();
+  addButton('Reset Scene', () => resetAll(), 0);
+  addButton('Export Edits', () => {
+    document.getElementById('btnExport').click();
+    toast('Edits exported');
+  }, 1);
+  nextRow();
+  addButton('Force Opaque', () => {
+    document.getElementById('btnOpaque').click();
+  }, 0);
+  addButton('Light/Dark', () => {
+    document.getElementById('btnTheme').click();
+  }, 1);
+  nextRow();
+
+  // === SIMPLIFY section ===
+  y -= gap * 2;
+  addLabel('SIMPLIFY');
+  // Slider track
+  const trackW = W - gap * 4, trackH = 0.012;
+  const trackGeo = new THREE.PlaneGeometry(trackW, trackH);
+  const trackMat = new THREE.MeshBasicMaterial({ color: 0x2a3140, transparent: true, opacity: 0.9 });
+  const track = new THREE.Mesh(trackGeo, trackMat);
+  track.position.set(0, y, 0.001);
+  vrWatch.group.add(track);
+  // Slider handle
+  const handleGeo = new THREE.PlaneGeometry(0.014, 0.02);
+  const handleMat = new THREE.MeshBasicMaterial({ color: 0xe0a43c });
+  const handle = new THREE.Mesh(handleGeo, handleMat);
+  handle.position.set(-trackW/2, y, 0.002);
+  vrWatch.group.add(handle);
+  vrWatch.sliderParts = { track, handle, trackW, y: y };
+  vrWatch.buttons.push(track); // make track clickable
+  track.userData.vrWatchAction = null; // handled specially in interaction
+  track.userData.isSlider = true;
+  nextRow();
+  addButton('Apply', () => {
+    document.getElementById('btnSimplify').click();
+  }, 0);
+  // Stats display (not clickable)
+  const statsC = document.createElement('canvas'); statsC.width = 128; statsC.height = 28;
+  const statsCtx = statsC.getContext('2d');
+  statsCtx.fillStyle = '#7d8798'; statsCtx.font = '11px sans-serif';
+  statsCtx.fillText('--', 4, 18);
+  const statsTex = new THREE.CanvasTexture(statsC);
+  const statsMesh = new THREE.Mesh(new THREE.PlaneGeometry(btnW, btnH),
+    new THREE.MeshBasicMaterial({ map: statsTex, transparent: true }));
+  statsMesh.position.set(btnW/2 + gap/2, y, 0.001);
+  vrWatch.group.add(statsMesh);
+  vrWatch.statsMesh = statsMesh;
+  vrWatch.statsTex = statsTex;
+  vrWatch.statsCtx = statsCtx;
+  vrWatch.statsCanvas = statsC;
+  nextRow();
+
+  // Background
+  const totalH = Math.abs(y) + gap * 2;
+  const bgGeo = new THREE.PlaneGeometry(W + gap * 2, totalH);
+  const bgMat = new THREE.MeshBasicMaterial({ color: 0x101318, transparent: true, opacity: 0.93 });
+  const bg = new THREE.Mesh(bgGeo, bgMat);
+  bg.position.set(0, y/2 + (btnH + gap)/2, -0.002);
+  vrWatch.group.add(bg);
+}
+createVRWatchMenu();
+
+function updateVRWatchStats(){
+  if (!vrWatch.statsCtx) return;
+  const ctx = vrWatch.statsCtx;
+  ctx.clearRect(0, 0, 128, 28);
+  ctx.fillStyle = '#7d8798'; ctx.font = '11px sans-serif';
+  const stats = document.getElementById('stats').textContent;
+  ctx.fillText(stats.slice(0, 22), 4, 18);
+  vrWatch.statsTex.needsUpdate = true;
+}
+
+function updateVRWatchSlider(pct){
+  if (!vrWatch.sliderParts) return;
+  const { handle, trackW } = vrWatch.sliderParts;
+  const x = -trackW/2 + trackW * pct;
+  handle.position.x = x;
+  // Update the DOM slider to match
+  const notch = Math.round(pct * 10);
+  document.getElementById('simplifySlider').value = notch;
+  document.getElementById('simplifyPct').textContent = (notch * 3) + '%';
+}
+
+// Check if either controller is in "look at watch" pose
+const WATCH_ACTIVATE_ANGLE = 50;   // degrees: palm-up must face within this of head direction
+const WATCH_DEACTIVATE_ANGLE = 70; // hysteresis: wider angle to close
+const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
+const WATCH_ACTIVATE_MS = 350;     // dwell time to open
+const WATCH_OFFSET = new THREE.Vector3(0, 0.08, -0.02); // offset from controller
+
+function checkWatchPose(){
+  if (!renderer.xr.isPresenting) return;
+  const session = renderer.xr.getSession();
+  if (!session) return;
+
+  camera.getWorldPosition(tmpV); // head position
+  const headPos = tmpV.clone();
+
+  for (const c of controllers){
+    const grip = c.userData.grip;
+    if (!grip) continue;
+    grip.updateMatrixWorld(true);
+
+    // Get controller position
+    const ctrlPos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
+
+    // Distance check
+    const dist = ctrlPos.distanceTo(headPos);
+    if (dist > WATCH_ACTIVATE_DIST) continue;
+
+    // Get controller's "up" direction (palm facing direction when holding controller)
+    // On Quest Touch controllers, local Y-up points away from the palm (toward the back of the hand)
+    // So the palm faces -Y local. We want to detect when the palm faces toward the head.
+    const palmDir = new THREE.Vector3(0, -1, 0); // palm direction in controller local
+    palmDir.transformDirection(grip.matrixWorld).normalize();
+
+    // Direction from controller to head
+    const toHead = new THREE.Vector3().subVectors(headPos, ctrlPos).normalize();
+
+    // Angle between palm direction and direction to head
+    const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(palmDir.dot(toHead), -1, 1)));
+
+    const threshold = vrWatch.visible ? WATCH_DEACTIVATE_ANGLE : WATCH_ACTIVATE_ANGLE;
+
+    if (angle < threshold){
+      // Pose is active
+      if (!vrWatch.visible){
+        vrWatch.activateTimer += 16.67; // approximate frame time
+        if (vrWatch.activateTimer >= WATCH_ACTIVATE_MS){
+          showVRWatch(grip, ctrlPos);
+        }
+      } else {
+        // Update menu position to follow wrist
+        positionVRWatch(grip);
+      }
+      return; // only one wrist at a time
+    }
+  }
+
+  // No controller in watch pose
+  if (vrWatch.visible){
+    hideVRWatch();
+  }
+  vrWatch.activateTimer = 0;
+}
+
+function positionVRWatch(grip){
+  grip.updateMatrixWorld(true);
+  const pos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
+  // Offset slightly above the wrist
+  const up = new THREE.Vector3(0, 1, 0).transformDirection(grip.matrixWorld);
+  pos.addScaledVector(up, 0.08);
+  vrWatch.group.position.copy(pos);
+  // Face the camera
+  camera.getWorldPosition(tmpV);
+  vrWatch.group.lookAt(tmpV);
+}
+
+function showVRWatch(grip, pos){
+  vrWatch.visible = true;
+  vrWatch.group.visible = true;
+  positionVRWatch(grip);
+  updateVRWatchStats();
+  // Sync slider position
+  const notch = parseInt(document.getElementById('simplifySlider').value, 10);
+  updateVRWatchSlider(notch / 10);
+}
+
+function hideVRWatch(){
+  vrWatch.visible = false;
+  vrWatch.group.visible = false;
+  vrWatch.activateTimer = 0;
 }
 const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false,
   editBtn:false, aDown:0, xDown:0, stickFwdTele:false };
@@ -2798,6 +3052,9 @@ renderer.setAnimationLoop(() => {
 
     // depth-cue line from each carried part down to the ground
     updateDepthLines();
+
+    // VR watch menu: check wrist pose each frame
+    checkWatchPose();
   } catch (e){
     if (!loopErrorLogged){ console.error('[loop] subsystem error (rendering continues):', e); loopErrorLogged = true; }
   }
