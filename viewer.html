@@ -885,6 +885,23 @@ function makeSwitch(node, isButton){
   const center = box.getCenter(new THREE.Vector3());
   if (isButton === undefined) isButton = /button|btn/i.test(node.name);
 
+  // Determine press axis: prefer stored face normal from when Edit was activated,
+  // fall back to shortest-dimension heuristic.
+  let pressAxis = (size.x <= size.y && size.x <= size.z) ? 'x' : (size.y <= size.z ? 'y' : 'z');
+  const ov = overrides.roles[path];
+  if (ov && ov.faceNormal){
+    // Convert world-space face normal to node's local space
+    const worldNormal = new THREE.Vector3().fromArray(ov.faceNormal);
+    // Transform into node-local direction (no translation, use inverse of world rotation)
+    const nodeInvWorld = new THREE.Matrix3().getNormalMatrix(
+      new THREE.Matrix4().copy(node.matrixWorld).invert().transpose()
+    ).invert();
+    const localNormal = worldNormal.clone().applyMatrix3(nodeInvWorld).normalize();
+    // Pick the axis with the largest absolute component
+    const ax = Math.abs(localNormal.x), ay = Math.abs(localNormal.y), az = Math.abs(localNormal.z);
+    pressAxis = ax >= ay && ax >= az ? 'x' : ay >= az ? 'y' : 'z';
+  }
+
   // Wrap in a pivot at the bounding-box center so scale animations
   // compress symmetrically inward regardless of the node's CAD origin.
   const parent = node.parent;
@@ -903,7 +920,7 @@ function makeSwitch(node, isButton){
     on:false, anim:0, animT:0,
     baseScale: pivot.scale.clone(),
     baseRot: pivot.rotation.clone(),
-    pressAxis: (size.x <= size.y && size.x <= size.z) ? 'x' : (size.y <= size.z ? 'y' : 'z'),
+    pressAxis,
     worldPos: center
   };
   interactables.push(inter);
@@ -1415,6 +1432,7 @@ function openEditor(){
   // If holding a part, edit that instead of raycasting
   const heldRec = held.get(camera);
   let hitNode;
+  let hitFaceNormalWorld = null;
   if (heldRec){
     hitNode = heldRec.node;
   } else {
@@ -1424,12 +1442,24 @@ function openEditor(){
     const h = firstHit(r.intersectObjects(meshes, false));
     if (!h){ toast('Aim the reticle at a part, then press T / Edit'); return; }
     hitNode = h.object;
+    // Capture face normal in world space for button press direction
+    if (h.face){
+      hitFaceNormalWorld = h.face.normal.clone()
+        .transformDirection(h.object.matrixWorld)
+        .normalize();
+    }
   }
   editChain = buildEditChain(hitNode);
   if (!editChain.length){ toast('This part has no named nodes to edit'); return; }
   editChainIdx = 0;
   editTarget = editChain[0];
   editPath = pathFor(editTarget);
+  // Store face normal hint in overrides for button press direction
+  // Stored as [x,y,z] world-space; makeSwitch converts to node-local on classify
+  if (hitFaceNormalWorld){
+    if (!overrides.roles[editPath]) overrides.roles[editPath] = { role: currentRole(editTarget) };
+    overrides.roles[editPath].faceNormal = hitFaceNormalWorld.toArray();
+  }
   renderEditor();
   editPanel.style.display = 'block';
   if (document.pointerLockElement) document.exitPointerLock();
