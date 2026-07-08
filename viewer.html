@@ -1368,12 +1368,20 @@ function buildEditChain(hitObject){
 function openEditor(){
   if (!worldRoot){ toast('Load a scene first'); return; }
   if (editPanel.style.display === 'block'){ closeEditor(); return; }
-  const r = centerRay(); r.far = 8;
-  const meshes = [];
-  worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
-  const h = firstHit(r.intersectObjects(meshes, false));
-  if (!h){ toast('Aim the reticle at a part, then press T / Edit'); return; }
-  editChain = buildEditChain(h.object);
+  // If holding a part, edit that instead of raycasting
+  const heldRec = held.get(camera);
+  let hitNode;
+  if (heldRec){
+    hitNode = heldRec.node;
+  } else {
+    const r = centerRay(); r.far = 8;
+    const meshes = [];
+    worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
+    const h = firstHit(r.intersectObjects(meshes, false));
+    if (!h){ toast('Aim the reticle at a part, then press T / Edit'); return; }
+    hitNode = h.object;
+  }
+  editChain = buildEditChain(hitNode);
   if (!editChain.length){ toast('This part has no named nodes to edit'); return; }
   editChainIdx = 0;
   editTarget = editChain[0];
