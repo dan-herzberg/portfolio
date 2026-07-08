@@ -745,21 +745,43 @@ function classify(root){
   pathIndex = new Map();
   root.traverse(o => { if (o !== root) pathIndex.set(nodePath(o, root), o); });
 
-  // walk tree, highest matching node wins, skip descendants of a match
-  const stack = [...root.children];
   const doors = [], switches = [], forcedGrabs = [], lightNodes = [];
+
+  // Phase 1: apply ALL explicit overrides first (these always win, at any depth)
+  const overriddenNodes = new Set();
+  for (const [path, ov] of Object.entries(overrides.roles)){
+    if (!ov.role || ov.role === 'static') continue;
+    const n = pathIndex.get(path);
+    if (!n) continue;
+    overriddenNodes.add(n);
+    if (ov.role==='door') doors.push([n, ov.hinge||'left', !!ov.locked]);
+    else if (ov.role==='switch') switches.push([n, false]);
+    else if (ov.role==='button') switches.push([n, true]);
+    else if (ov.role==='grabbable') forcedGrabs.push(n);
+    else if (ov.role==='light') lightNodes.push(n);
+  }
+  // Mark static overrides
+  for (const [path, ov] of Object.entries(overrides.roles)){
+    if (ov.role === 'static'){
+      const n = pathIndex.get(path);
+      if (n){ n.userData.noGrab = true; overriddenNodes.add(n); }
+    }
+  }
+
+  // Phase 2: auto-detect by name, skipping anything under an overridden node
+  function isUnderOverridden(node){
+    let p = node.parent;
+    while (p && p !== root){
+      if (overriddenNodes.has(p)) return true;
+      p = p.parent;
+    }
+    return false;
+  }
+  const stack = [...root.children];
   while (stack.length){
     const n = stack.pop();
-    const ov = overrides.roles[nodePath(n, root)];
-    if (ov){
-      if (ov.role==='door') doors.push([n, ov.hinge||'left', !!ov.locked]);
-      else if (ov.role==='switch') switches.push([n, false]);
-      else if (ov.role==='button') switches.push([n, true]);
-      else if (ov.role==='grabbable') forcedGrabs.push(n);
-      else if (ov.role==='light') lightNodes.push(n);
-      else if (ov.role==='static') n.userData.noGrab = true;
-      continue;
-    }
+    if (overriddenNodes.has(n)) continue;  // already handled in phase 1
+    if (isUnderOverridden(n)){ continue; } // ancestor was overridden, skip
     if (SWITCH_RE.test(n.name)) { switches.push([n, /button|btn/i.test(n.name)]); continue; }
     if (DOOR_RE.test(n.name))   { doors.push([n, 'left', false]); continue; }
     stack.push(...n.children);
