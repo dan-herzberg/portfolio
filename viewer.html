@@ -256,12 +256,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-// SPIKE: Rapier physics engine (rapier3d-compat inlines its WASM as base64,
-// so this is a single ESM import - no separate .wasm fetch). init() must
-// resolve before any RAPIER.* call; top-level await pauses the module here
-// until the engine is ready.
-import RAPIER from '@dimforge/rapier3d-compat';
-await RAPIER.init();
+// SPIKE: Rapier is loaded DYNAMICALLY and defensively (see initPhysics near
+// the end) - never with a static import + top-level await, since a failed
+// engine load must not halt the module and take the whole UI down with it.
 
 /* ============================== core setup ============================== */
 const scene = new THREE.Scene();
@@ -1956,7 +1953,9 @@ function updateTeleportMarker(){
      one part onto another that has never moved will pass through.            */
 
 const physGravity = { x: 0, y: -9.81, z: 0 };
-const physWorld = new RAPIER.World(physGravity);
+let RAPIER = null;              // filled in by initPhysics() once the engine loads
+let physWorld = null;
+let physReady = false;
 let physStaticBodies = [];
 let physStaticDirty = false;
 const PHYS_RESTITUTION = 0.2;   // low bounce, matches the old settle-fast feel
@@ -1971,7 +1970,25 @@ const _pm = new THREE.Matrix4(), _pm2 = new THREE.Matrix4();
 
 function physicsMarkStaticDirty(){ physStaticDirty = true; }
 
+// Load the engine after the UI is fully wired. A failure here leaves the app
+// fully usable with physics simply disabled (dropped parts stay put) rather
+// than taking the whole page down.
+async function initPhysics(){
+  try {
+    const mod = await import('@dimforge/rapier3d-compat');
+    RAPIER = mod.default || mod;
+    await RAPIER.init();
+    physWorld = new RAPIER.World(physGravity);
+    physReady = true;
+    physicsMarkStaticDirty();   // build colliders for the already-loaded world
+  } catch (e){
+    console.error('[physics] Rapier failed to load:', e);
+    toast('Physics engine failed to load — parts will not fall');
+  }
+}
+
 function physicsRemovePart(rec){
+  if (!physReady) return;
   for (let i = dropping.length - 1; i >= 0; i--){
     if (dropping[i].rec === rec){
       physWorld.removeRigidBody(dropping[i].body);
@@ -1980,11 +1997,13 @@ function physicsRemovePart(rec){
   }
 }
 function physicsClearDynamic(){
+  if (!physReady){ dropping.length = 0; return; }
   for (const d of dropping) physWorld.removeRigidBody(d.body);
   dropping.length = 0;
 }
 function physicsClearAll(){
   physicsClearDynamic();
+  if (!physReady){ physStaticBodies = []; return; }
   for (const b of physStaticBodies) physWorld.removeRigidBody(b);
   physStaticBodies = [];
 }
@@ -1992,6 +2011,7 @@ function physicsClearAll(){
 // static colliders for the room: every collidable mesh that isn't part of a
 // grabbable, as a cuboid from its own local bounding box
 function physicsBuildStatic(){
+  if (!physReady) return;
   for (const b of physStaticBodies) physWorld.removeRigidBody(b);
   physStaticBodies = [];
   const grabSet = new Set(grabMeshes);
@@ -2022,6 +2042,7 @@ function physicsBuildStatic(){
 function physicsDropPart(rec, vel, angVel){
   physicsRemovePart(rec);
   scene.attach(rec.node);          // identity parent -> body world == node local
+  if (!physReady) return;          // engine not up: leave the part where released
   rec.node.updateWorldMatrix(true, false);
   rec.node.matrixWorld.decompose(_pp, _pq, _ps);
   const body = physWorld.createRigidBody(
@@ -2059,6 +2080,7 @@ function physicsDropPart(rec, vel, angVel){
 
 // step the world and copy every dynamic body's transform back onto its mesh
 function physicsStep(dt){
+  if (!physReady) return;
   if (physStaticDirty){ physicsBuildStatic(); physStaticDirty = false; }
   physWorld.timestep = Math.min(dt, PHYS_MAX_STEP);
   physWorld.step();
@@ -2332,6 +2354,10 @@ function buildDemo(keepPlayer=false){
 }
 
 toast('Load a .glb, or open the demo room');
+
+// kick off engine loading last, so every UI handler above is already wired
+// even if the physics module is slow or fails
+initPhysics();
 </script>
 </body>
 </html>
