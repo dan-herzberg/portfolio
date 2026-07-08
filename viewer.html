@@ -2143,30 +2143,105 @@ function onVRTrigger(c){
   c.getWorldPosition(tmpV3);
   tryInteract(rayFrom(c), tmpV3.clone());
 }
-const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false };
+const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false,
+  editBtn:false, aDown:0, xDown:0, stickFwdTele:false };
+const XR_HOLD_MS = 500;  // hold threshold for A=fly, X=resetAll
 function pollXRInput(dt){
   const session = renderer.xr.getSession();
   if (!session) return { mx:0, mz:0 };
   let mx=0, mz=0;
+  const now = performance.now();
   for (const src of session.inputSources){
     const gp = src.gamepad;
     if (!gp) continue;
     if (src.handedness === 'left'){
       mx = gp.axes[2] || 0; mz = gp.axes[3] || 0;
-      const x = gp.buttons[4];   // X
-      if (x?.pressed && !xrLatch.resetBtn) resetAll();
+
+      // X button: tap = reset aimed/held part, hold = reset entire scene
+      const x = gp.buttons[4];
+      if (x?.pressed && !xrLatch.resetBtn){
+        xrLatch.xDown = now;
+      }
+      if (!x?.pressed && xrLatch.resetBtn){
+        const held_time = now - xrLatch.xDown;
+        if (held_time >= XR_HOLD_MS){
+          resetAll();
+        } else {
+          // tap: reset aimed or held part
+          const c = controllers.find(cc => cc.userData.grip);
+          const grip = c ? c.userData.grip : null;
+          const heldPart = grip ? held.get(grip) : null;
+          if (heldPart){ held.delete(grip); snapHome(heldPart); }
+          else {
+            const r = rayFrom(controllers[1] || controllers[0]); r.far = 4.5;
+            const h = firstHit(r.intersectObjects(grabMeshes, false));
+            if (h) snapHome(h.object.userData.grab);
+          }
+        }
+      }
       xrLatch.resetBtn = !!x?.pressed;
+
+      // Y button: edit aimed part (like T key)
+      const y = gp.buttons[5];
+      if (y?.pressed && !xrLatch.editBtn){
+        // In VR, open editor for aimed part via raycast from right controller
+        const rc = controllers[1] || controllers[0];
+        const r = rayFrom(rc); r.far = 8;
+        const meshes = [];
+        if (worldRoot) worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
+        const h = firstHit(r.intersectObjects(meshes, false));
+        if (h){
+          editChain = buildEditChain(h.object);
+          if (editChain.length){
+            editChainIdx = 0;
+            editTarget = editChain[0];
+            editPath = pathFor(editTarget);
+            // In VR we can't show the DOM panel, but we can cycle roles
+            const curRole = currentRole(editTarget);
+            const nextIdx = (ROLES.indexOf(curRole) + 1) % ROLES.length;
+            setRoleOverride(editPath, ROLES[nextIdx]);
+            toast(editTarget.name + ' → ' + ROLES[nextIdx]);
+          }
+        } else { toast('Aim at a part and press Y to cycle role'); }
+      }
+      xrLatch.editBtn = !!y?.pressed;
+
+      // Left stick forward held = temporary teleport mode
+      const fwd = (gp.axes[3] || 0) < -0.7;
+      if (fwd && !xrLatch.stickFwdTele && mode !== 'teleport'){
+        xrLatch.stickFwdTele = true;
+        xrLatch.prevMode = mode;
+        setMode('teleport');
+      } else if (!fwd && xrLatch.stickFwdTele){
+        xrLatch.stickFwdTele = false;
+        if (xrLatch.prevMode) setMode(xrLatch.prevMode);
+      }
+
     } else if (src.handedness === 'right'){
       const sx = gp.axes[2] || 0;
       if (Math.abs(sx) > 0.6 && xrLatch.snap === 0){
         xrLatch.snap = Math.sign(sx);
         snapTurn(-Math.sign(sx) * Math.PI/6);
       } else if (Math.abs(sx) < 0.3) xrLatch.snap = 0;
-      const a = gp.buttons[4];   // A
-      if (a?.pressed && !xrLatch.modeBtn)
-        setMode(MODES[(MODES.indexOf(mode)+1)%MODES.length]);
+
+      // A button: tap = jump, hold = fly mode
+      const a = gp.buttons[4];
+      if (a?.pressed && !xrLatch.modeBtn){
+        xrLatch.aDown = now;
+      }
+      if (!a?.pressed && xrLatch.modeBtn){
+        const held_time = now - xrLatch.aDown;
+        if (held_time >= XR_HOLD_MS){
+          setMode(mode === 'fly' ? 'walk' : 'fly');
+        } else {
+          // tap: jump
+          if (st.grounded){ st.velY = 4.4; st.grounded = false; }
+        }
+      }
       xrLatch.modeBtn = !!a?.pressed;
-      const b = gp.buttons[5];   // B — crouch toggle
+
+      // B button: crouch toggle
+      const b = gp.buttons[5];
       if (b?.pressed && !xrLatch.crouchBtn) st.crouching = !st.crouching;
       xrLatch.crouchBtn = !!b?.pressed;
     }
