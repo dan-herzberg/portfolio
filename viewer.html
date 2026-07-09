@@ -1959,7 +1959,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-document.getElementById('buildVer').textContent = 'build 2025-07-08.1';
+document.getElementById('buildVer').textContent = 'build 2025-07-08.2';
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
   '| hover:', matchMedia('(hover: hover)').matches,
@@ -2136,6 +2136,47 @@ for (let i=0;i<2;i++){
   c.addEventListener('squeezeend', ()=>releaseHeld(grip));
   controllers.push(c);
 }
+/* ============================== in-VR debug HUD ============================== */
+// DOM toasts and console are invisible in a headset, so surface state on a
+// small head-locked panel. Toggled with the left thumbstick-click; on by
+// default while we diagnose VR issues.
+let vrDebugOn = true;
+const vrDebug = { canvas: document.createElement('canvas'), lines: {} };
+vrDebug.canvas.width = 512; vrDebug.canvas.height = 256;
+vrDebug.ctx = vrDebug.canvas.getContext('2d');
+vrDebug.tex = new THREE.CanvasTexture(vrDebug.canvas);
+vrDebug.mesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.28, 0.14),
+  new THREE.MeshBasicMaterial({ map: vrDebug.tex, transparent: true, depthTest: false })
+);
+vrDebug.mesh.position.set(0, -0.18, -0.6);   // lower-center of view
+vrDebug.mesh.renderOrder = 999;
+camera.add(vrDebug.mesh);
+vrDebug.mesh.visible = false;
+let vrFrameCount = 0;
+let vrLastError = '';
+function drawVRDebug(){
+  if (!vrDebugOn || !renderer.xr.isPresenting){ vrDebug.mesh.visible = false; return; }
+  vrDebug.mesh.visible = true;
+  const ctx = vrDebug.ctx;
+  ctx.fillStyle = 'rgba(16,19,24,0.9)'; ctx.fillRect(0,0,512,256);
+  ctx.fillStyle = '#e0a43c'; ctx.font = 'bold 20px monospace';
+  ctx.fillText('VR DEBUG  build 2025-07-08.2', 10, 26);
+  ctx.font = '18px monospace'; ctx.fillStyle = '#cfd6e2';
+  const session = renderer.xr.getSession();
+  const srcs = session ? [...session.inputSources] : [];
+  const hands = srcs.map(s => s.handedness + (s.gamepad?'✓':'✗')).join(' ');
+  let y = 56;
+  const put = (t) => { ctx.fillText(t, 10, y); y += 24; };
+  put('frame: ' + vrFrameCount + '  presenting: ' + renderer.xr.isPresenting);
+  put('controllers: ' + controllers.length + '  sources: ' + srcs.length);
+  put('hands: ' + (hands || 'none'));
+  put('watch: ' + vrWatch.visible + '  edit: ' + vrMenu.visible);
+  put('mode: ' + mode + '  crouch: ' + st.crouching);
+  if (vrLastError){ ctx.fillStyle = '#e05252'; put('ERR: ' + vrLastError.slice(0,36)); }
+  vrDebug.tex.needsUpdate = true;
+}
+
 function rayFrom(c){
   tmpM.identity().extractRotation(c.matrixWorld);
   ray.ray.origin.setFromMatrixPosition(c.matrixWorld);
@@ -2554,7 +2595,7 @@ function hideVRWatch(){
   vrWatch.activateTimer = 0;
 }
 const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false,
-  editBtn:false, aDown:0, xDown:0, stickFwdTele:false };
+  editBtn:false, aDown:0, xDown:0, stickFwdTele:false, dbgBtn:false };
 const XR_HOLD_MS = 500;  // hold threshold for A=fly, X=resetAll
 function pollXRInput(dt){
   const session = renderer.xr.getSession();
@@ -2566,6 +2607,11 @@ function pollXRInput(dt){
     if (!gp) continue;
     if (src.handedness === 'left'){
       mx = gp.axes[2] || 0; mz = gp.axes[3] || 0;
+
+      // Left thumbstick click (buttons[3]) toggles the in-VR debug HUD
+      const lstick = gp.buttons[3];
+      if (lstick?.pressed && !xrLatch.dbgBtn){ vrDebugOn = !vrDebugOn; }
+      xrLatch.dbgBtn = !!lstick?.pressed;
 
       // X button: tap = reset aimed/held part, hold = reset entire scene
       const x = gp.buttons[4];
@@ -3059,8 +3105,12 @@ renderer.setAnimationLoop(() => {
     // VR watch menu: check wrist pose each frame
     checkWatchPose();
   } catch (e){
+    vrLastError = (e && e.message) ? e.message : String(e);
     if (!loopErrorLogged){ console.error('[loop] subsystem error (rendering continues):', e); loopErrorLogged = true; }
   }
+
+  vrFrameCount++;
+  try { drawVRDebug(); } catch (e){ /* debug HUD must never break the loop */ }
 
   renderer.render(scene, camera);
 });
