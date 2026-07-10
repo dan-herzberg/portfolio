@@ -671,10 +671,14 @@ function countTris(){
 }
 const PHYS_ENGINE = 'Rapier';   // SPIKE badge - shows which physics branch is running
 function updateStats(){
-  statsEl.textContent = `[physics: ${PHYS_ENGINE}] ${currentLabel} | ${countTris().toLocaleString()} tris | `
+  const info = `[physics: ${PHYS_ENGINE}] ${currentLabel} | ${countTris().toLocaleString()} tris | `
     + `${interactables.filter(i=>i.kind==='door').length} doors | `
     + `${interactables.filter(i=>i.kind==='switch').length} switches | `
     + `${grabbables.length} grabbable parts`;
+  // Preserve the build version span — only replace the text before it
+  const verEl = document.getElementById('buildVer');
+  const verText = verEl ? verEl.textContent : '';
+  statsEl.innerHTML = info + '<br><span id="buildVer" style="color:var(--dim);font-size:10px;">' + verText + '</span>';
 }
 
 const PEDESTAL_MAX_DIM = 0.6096;   // 24 inches in meters
@@ -1959,7 +1963,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-document.getElementById('buildVer').textContent = 'build 2025-07-08.2';
+document.getElementById('buildVer').textContent = 'build 2026-07-10.1';
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
   '| hover:', matchMedia('(hover: hover)').matches,
@@ -2161,7 +2165,7 @@ function drawVRDebug(){
   const ctx = vrDebug.ctx;
   ctx.fillStyle = 'rgba(16,19,24,0.9)'; ctx.fillRect(0,0,512,256);
   ctx.fillStyle = '#e0a43c'; ctx.font = 'bold 20px monospace';
-  ctx.fillText('VR DEBUG  build 2025-07-08.2', 10, 26);
+  ctx.fillText('VR DEBUG  build 2026-07-10.1', 10, 26);
   ctx.font = '18px monospace'; ctx.fillStyle = '#cfd6e2';
   const session = renderer.xr.getSession();
   const srcs = session ? [...session.inputSources] : [];
