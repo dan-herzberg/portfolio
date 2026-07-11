@@ -429,7 +429,7 @@ let sceneLights = [];
 const held = new Map();        // holder Object3D -> grab record
 let hoveredGrab = null;        // currently aimed-at grabbable, for hover highlight
 const HOVER_GLOW = 0x24303f;   // cool, dim: distinct from held (amber) and switch-on (green)
-const st = { yaw:0, pitch:0, velY:0, grounded:false, crouching:false };
+const st = { yaw:0, pitch:0, velY:0, grounded:false, crouching:false, wasCrouchingXR:false };
 const spawnPos = new THREE.Vector3();
 let spawnYaw = 0;
 const keys = {};
@@ -770,6 +770,19 @@ function classify(root){
   pathIndex = new Map();
   root.traverse(o => { if (o !== root) pathIndex.set(nodePath(o, root), o); });
 
+  // Dispose suppressed (simplify slider) and manually-deleted parts FIRST,
+  // before any classification below runs. Disposing them only at the end
+  // (after doors/switches/lights/grabbables had already been registered
+  // against them) left stale grab/interact records pointing at detached,
+  // freed meshes - letting a "removed" part still be grabbed or toggled.
+  const disposedPaths = new Set([...suppressedPaths, ...(overrides.deleted || [])]);
+  for (const path of disposedPaths){
+    const node = pathIndex.get(path);
+    if (!node) continue;
+    for (const [p, n] of pathIndex){ if (isDescendantOf(n, node)) pathIndex.delete(p); }
+    disposeNode(node);
+  }
+
   const doors = [], switches = [], forcedGrabs = [], lightNodes = [];
 
   // Phase 1: apply ALL explicit overrides first (these always win, at any depth)
@@ -825,28 +838,22 @@ function classify(root){
       if (node) applyColorToNode(node, ov.color);
     }
   }
-
-  // dispose suppressed parts (simplification slider)
-  if (suppressedPaths.size > 0){
-    for (const path of suppressedPaths){
-      const node = pathIndex.get(path);
-      if (node) disposeNode(node);
-    }
-  }
-
-  // dispose manually deleted parts (persists in overrides.deleted)
-  if (overrides.deleted && overrides.deleted.length > 0){
-    for (const path of overrides.deleted){
-      const node = pathIndex.get(path);
-      if (node) disposeNode(node);
-    }
-  }
 }
 
 function cloneMaterials(node){
   node.traverse(o => {
     if (!o.isMesh) return;
-    o.material = Array.isArray(o.material) ? o.material.map(m=>m.clone()) : o.material.clone();
+    const cloneOne = m => {
+      const c = m.clone();
+      // .clone() only copies real THREE.Material properties, not the
+      // _editOrigEmissive expando the in-situ editor uses to remember what
+      // to restore on close - carry it over so cloning a material mid-edit
+      // (e.g. the color picker cloning before recoloring) doesn't strand
+      // the part with its edit-highlight tint stuck on permanently
+      if (m._editOrigEmissive !== undefined) c._editOrigEmissive = m._editOrigEmissive;
+      return c;
+    };
+    o.material = Array.isArray(o.material) ? o.material.map(cloneOne) : cloneOne(o.material);
   });
 }
 function markMeshes(node, key, record, bucket){
@@ -856,7 +863,21 @@ function setGlow(node, hex){
   node.traverse(o => {
     if (!o.isMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
-    for (const m of mats) if (m.emissive) m.emissive.setHex(hex);
+    for (const m of mats){
+      if (!m.emissive) continue;
+      if (m._editOrigEmissive !== undefined){
+        // this material is currently showing the in-situ editor's
+        // highlight tint - don't clobber what's on screen, just keep the
+        // value clearEditHighlight() will restore in sync with the real
+        // underlying state. Otherwise releasing a held part (or a hover/
+        // switch change) while its editor panel is still open would be
+        // lost the moment editing ends, restoring a stale amber/glow tint
+        // onto a part that's no longer held/hovered/on.
+        m._editOrigEmissive = hex;
+      } else {
+        m.emissive.setHex(hex);
+      }
+    }
   });
 }
 function setHoverGlow(rec){
@@ -1140,11 +1161,7 @@ function firstHit(hits, skipHeld=true){
   return null;
 }
 function isHeld(obj){
-  for (const rec of held.values()){
-    let p = obj;
-    while (p){ if (p === rec.node) return true; p = p.parent; }
-  }
-  return false;
+  return holderOf(obj) !== null;
 }
 
 function activate(inter, fromPos){
@@ -1428,9 +1445,31 @@ function findInterFor(node){
 }
 function rebuildWorld(){
   if (!lastSource) return;
-  if (lastSource.kind === 'demo') buildDemo(true);
+  // Preserve whichever part(s) are currently held so editing a part while
+  // holding it (T key edits the held part directly) doesn't drop it out of
+  // the player's hand - buildWorld()'s clearWorld() unconditionally
+  // releases every held part before rebuilding, since the old node
+  // references are about to be replaced. Captured by path (survives the
+  // rebuild the same way editPath/editTarget re-resolution already does
+  // below) rather than by node reference.
+  const heldPaths = [];
+  for (const [holder, rec] of held) heldPaths.push([holder, rec.path]);
+  const reGrab = () => {
+    for (const [holder, path] of heldPaths){
+      // a role change away from 'grabbable' means the part legitimately
+      // isn't grabbable anymore (e.g. edited into a door) - grabbables.find
+      // returning nothing is correct in that case, not a bug
+      const rec = grabbables.find(g => g.path === path);
+      if (!rec) continue;
+      holder.attach(rec.node);
+      held.set(holder, rec);
+      rec.holdHistory = [];
+      setGlow(rec.node, 0x3a2f10);
+    }
+  };
+  if (lastSource.kind === 'demo') { buildDemo(true); reGrab(); }
   else loader.parse(lastSource.buffer.slice(0), '',
-    g => buildWorld(g.scene, lastSource.label, true),
+    g => { buildWorld(g.scene, lastSource.label, true); reGrab(); },
     err => { console.error(err); toast('Rebuild failed'); });
 }
 function applyOverrideSettings(){
@@ -1637,6 +1676,12 @@ function applyColor(hex){
   toast('Color: ' + hex);
 }
 function applyColorToNode(node, hex){
+  // Clone this node's materials before mutating them, same as every other
+  // role-assignment path (registerGrabbable/makeDoor/makeSwitch/makeLight) -
+  // GLTFLoader commonly dedups materials across meshes, so mutating
+  // .color in place on a shared material bleeds the change onto every
+  // other mesh that happens to reference the same material instance.
+  cloneMaterials(node);
   const color = new THREE.Color(hex);
   node.traverse(o => {
     if (o.isLight && o.isPointLight){
@@ -2060,65 +2105,69 @@ const look = { id:null, lx:0, ly:0 };
 const stickEl = document.getElementById('stick'), knob = document.getElementById('knob');
 let mUpHeld=false, mDownHeld=false, mJumpHeld=false;
 
-if (isTouch) {
-  stickEl.addEventListener('touchstart', e => {
-    const t = e.changedTouches[0];
-    joy.active = true; joy.id = t.identifier;
-    const r = stickEl.getBoundingClientRect();
-    joy.cx = r.left + r.width/2; joy.cy = r.top + r.height/2;
-    e.preventDefault();
-  }, {passive:false});
-  addEventListener('touchmove', e => {
-    for (const t of e.changedTouches){
-      if (joy.active && t.identifier === joy.id){
-        joy.x = THREE.MathUtils.clamp((t.clientX - joy.cx)/45, -1, 1);
-        joy.y = THREE.MathUtils.clamp((t.clientY - joy.cy)/45, -1, 1);
-        knob.style.left = (38 + joy.x*34) + 'px';
-        knob.style.top  = (38 + joy.y*34) + 'px';
-      } else if (t.identifier === look.id){
-        st.yaw   -= (t.clientX - look.lx) * 0.005;
-        st.pitch = THREE.MathUtils.clamp(st.pitch - (t.clientY - look.ly)*0.005, -1.45, 1.45);
-        look.lx = t.clientX; look.ly = t.clientY;
-        applyLook();
-      }
+// These listeners are registered UNCONDITIONALLY (not gated on the initial
+// isTouch guess) - registering touch listeners on a device that never sends
+// touch events is harmless, but gating them on isTouch meant that if the
+// static guess started false and setTouchMode() later corrected it to true
+// from a real touch event, the joystick/buttons became visible with no
+// listeners ever attached: touchable but completely inert.
+stickEl.addEventListener('touchstart', e => {
+  const t = e.changedTouches[0];
+  joy.active = true; joy.id = t.identifier;
+  const r = stickEl.getBoundingClientRect();
+  joy.cx = r.left + r.width/2; joy.cy = r.top + r.height/2;
+  e.preventDefault();
+}, {passive:false});
+addEventListener('touchmove', e => {
+  for (const t of e.changedTouches){
+    if (joy.active && t.identifier === joy.id){
+      joy.x = THREE.MathUtils.clamp((t.clientX - joy.cx)/45, -1, 1);
+      joy.y = THREE.MathUtils.clamp((t.clientY - joy.cy)/45, -1, 1);
+      knob.style.left = (38 + joy.x*34) + 'px';
+      knob.style.top  = (38 + joy.y*34) + 'px';
+    } else if (t.identifier === look.id){
+      st.yaw   -= (t.clientX - look.lx) * 0.005;
+      st.pitch = THREE.MathUtils.clamp(st.pitch - (t.clientY - look.ly)*0.005, -1.45, 1.45);
+      look.lx = t.clientX; look.ly = t.clientY;
+      applyLook();
     }
-  }, {passive:true});
-  addEventListener('touchend', e => {
-    for (const t of e.changedTouches){
-      if (t.identifier === joy.id){ joy.active=false; joy.x=joy.y=0;
-        knob.style.left='38px'; knob.style.top='38px'; }
-      if (t.identifier === look.id) look.id = null;
-    }
-  });
-  renderer.domElement.addEventListener('touchstart', e => {
-    const t = e.changedTouches[0];
-    if (t.clientX > innerWidth*0.4 && look.id === null){
-      look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
-    }
-  }, {passive:true});
+  }
+}, {passive:true});
+addEventListener('touchend', e => {
+  for (const t of e.changedTouches){
+    if (t.identifier === joy.id){ joy.active=false; joy.x=joy.y=0;
+      knob.style.left='38px'; knob.style.top='38px'; }
+    if (t.identifier === look.id) look.id = null;
+  }
+});
+renderer.domElement.addEventListener('touchstart', e => {
+  const t = e.changedTouches[0];
+  if (t.clientX > innerWidth*0.4 && look.id === null){
+    look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
+  }
+}, {passive:true});
 
-  const hold = (id, on, off) => {
-    const b = document.getElementById(id);
-    b.addEventListener('touchstart', e=>{ e.preventDefault(); on(); }, {passive:false});
-    b.addEventListener('touchend', ()=>off && off());
-  };
-  hold('mInteract', ()=>{ camera.getWorldPosition(tmpV3); tryInteract(centerRay(), tmpV3.clone()); });
-  hold('mGrab', ()=>grabWith(camera, centerRay()));
-  hold('mSnap', ()=>{
-    const rec = held.get(camera);
-    if (rec){ held.delete(camera); snapHome(rec); }
-  });
-  // Jump works in every mode: walk/teleport = jump off the ground,
-  // fly = ascend while held (same as the Up button)
-  hold('mJump',
-    ()=>{ if (mode==='fly') mJumpHeld = true; else if (st.grounded) st.velY = 4.4; },
-    ()=>mJumpHeld = false);
-  hold('mEdit', ()=>openEditor());
-  hold('mCrouch', ()=>{ st.crouching = !st.crouching;
-    document.getElementById('mCrouch').classList.toggle('on', st.crouching); });
-  hold('mUp', ()=>mUpHeld=true, ()=>mUpHeld=false);
-  hold('mDown', ()=>mDownHeld=true, ()=>mDownHeld=false);
-}
+const hold = (id, on, off) => {
+  const b = document.getElementById(id);
+  b.addEventListener('touchstart', e=>{ e.preventDefault(); on(); }, {passive:false});
+  b.addEventListener('touchend', ()=>off && off());
+};
+hold('mInteract', ()=>{ camera.getWorldPosition(tmpV3); tryInteract(centerRay(), tmpV3.clone()); });
+hold('mGrab', ()=>grabWith(camera, centerRay()));
+hold('mSnap', ()=>{
+  const rec = held.get(camera);
+  if (rec){ held.delete(camera); snapHome(rec); }
+});
+// Jump works in every mode: walk/teleport = jump off the ground,
+// fly = ascend while held (same as the Up button)
+hold('mJump',
+  ()=>{ if (mode==='fly') mJumpHeld = true; else if (st.grounded) st.velY = 4.4; },
+  ()=>mJumpHeld = false);
+hold('mEdit', ()=>openEditor());
+hold('mCrouch', ()=>{ st.crouching = !st.crouching;
+  document.getElementById('mCrouch').classList.toggle('on', st.crouching); });
+hold('mUp', ()=>mUpHeld=true, ()=>mUpHeld=false);
+hold('mDown', ()=>mDownHeld=true, ()=>mDownHeld=false);
 
 /* ============================== VR ============================== */
 const cmf = new XRControllerModelFactory();
@@ -2786,19 +2835,26 @@ function updateMovement(dt){
     const cx = inXR ? camera.getWorldPosition(tmpV2).x : player.position.x;
     const cz = inXR ? tmpV2.z : player.position.z;
     const gy = currentGroundY(cx, cz, player.position.y);
+    // VR crouch: rest height is a fixed offset below true ground (camera
+    // tracks real head position, so we lower the whole rig), not a
+    // per-frame subtraction - a `-= 0.6` every frame never converges and
+    // sinks the player through the floor indefinitely
+    const crouchingXR = inXR && st.crouching && mode !== 'fly';
+    const restY = gy + (crouchingXR ? -0.6 : 0);
     st.velY -= 9.8*dt;
     player.position.y += st.velY*dt;
-    if (player.position.y <= gy + 0.02 && st.velY <= 0){
-      // step limit: refuse pop-ups taller than 0.5 m
-      if (gy - (player.position.y - st.velY*dt) < 0.55){
-        player.position.y = gy; st.velY = 0; st.grounded = true;
+    if (player.position.y <= restY + 0.02 && st.velY <= 0){
+      // step limit: refuse pop-ups taller than 0.5 m - but bypass it while
+      // crouch is active or was just released, since the "step" it would
+      // measure there is our own 0.6 m crouch offset (deeper than the
+      // 0.55 m limit), not real environment geometry
+      const bypassStepLimit = crouchingXR || st.wasCrouchingXR;
+      if (bypassStepLimit || gy - (player.position.y - st.velY*dt) < 0.55){
+        player.position.y = restY; st.velY = 0; st.grounded = true;
       } else { player.position.y = Math.max(player.position.y, 0); st.velY = 0; }
     } else st.grounded = false;
+    st.wasCrouchingXR = crouchingXR;
     if (player.position.y < -20){ player.position.set(0,2,4); st.velY=0; }
-    // VR crouch: offset player rig down when crouching (camera tracks real head)
-    if (inXR && st.crouching && mode !== 'fly'){
-      player.position.y -= 0.6;
-    }
   }
 
   // smooth camera height for crouch (walk/teleport only)
@@ -2961,6 +3017,16 @@ function physicsRemovePart(rec){
   }
 }
 function physicsClearDynamic(){
+  // dropped parts are reparented onto `scene` directly while simulated (see
+  // physicsDropPart) so Rapier's world-space transform can be written
+  // straight into local position/quaternion each frame. That means clearing
+  // just the physics body isn't enough - resetAll() re-adopts every rec via
+  // snapHome() right after this runs, but clearWorld() never does, so
+  // without this the mesh would be orphaned under `scene` forever, invisible
+  // to the next load/rebuild and never cleaned up.
+  for (const d of dropping){
+    if (d.rec.node.parent) d.rec.node.parent.remove(d.rec.node);
+  }
   if (!physReady){ dropping.length = 0; return; }
   for (const d of dropping) physWorld.removeRigidBody(d.body);
   dropping.length = 0;
@@ -3073,6 +3139,14 @@ renderer.setAnimationLoop(() => {
       if (i.kind==='door'){
         i.angle = THREE.MathUtils.damp(i.angle, i.target, 6, dt);
         i.pivot.rotation.y = i.closedY + i.angle;
+        // Rapier's static colliders are baked from world transforms at
+        // build time and only refreshed when marked dirty - without this,
+        // a swinging door's collider stays frozen at wherever it was when
+        // the physics world was (re)built, so a dropped part can collide
+        // with a door that has visually already opened, or vice versa.
+        // Bounded to while actually mid-swing so a settled door doesn't
+        // pay a full static-collider rebuild every frame.
+        if (Math.abs(i.angle - i.target) > 0.001) physicsMarkStaticDirty();
       } else if (i.animT > 0){
         i.animT = Math.max(0, i.animT - dt*4);
         const k = Math.sin(i.animT * Math.PI);
@@ -3084,6 +3158,8 @@ renderer.setAnimationLoop(() => {
           i.node.rotation.copy(i.baseRot);
           i.node.rotation.x = i.baseRot.x + (i.on ? 0.45 : -0.45) * (1 - i.animT);
         }
+        // same staleness issue as doors, bounded to the press/flip animation
+        physicsMarkStaticDirty();
       }
     }
 
