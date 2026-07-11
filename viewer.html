@@ -842,7 +842,12 @@ function classify(root){
 
 function cloneMaterials(node){
   node.traverse(o => {
-    if (!o.isMesh) return;
+    // idempotent per-mesh: applyColorToNode calls this on every color-picker
+    // drag tick to guarantee a private material before mutating it, so a
+    // repeat call must be a cheap no-op rather than cloning (and forcing a
+    // shader recompile) again on every single 'input' event of a live drag
+    if (!o.isMesh || o.userData.materialCloned) return;
+    o.userData.materialCloned = true;
     const cloneOne = m => {
       const c = m.clone();
       // .clone() only copies real THREE.Material properties, not the
@@ -1456,6 +1461,11 @@ function rebuildWorld(){
   for (const [holder, rec] of held) heldPaths.push([holder, rec.path]);
   const reGrab = () => {
     for (const [holder, path] of heldPaths){
+      // loading a real .glb reparses async (GLTFLoader.parse), so the old
+      // world/held map/grabMeshes stay live during that gap - if the user
+      // grabbed/released something with this same holder in the meantime,
+      // that's a fresher action than this stale snapshot; don't stomp on it
+      if (held.has(holder)) continue;
       // a role change away from 'grabbable' means the part legitimately
       // isn't grabbable anymore (e.g. edited into a door) - grabbables.find
       // returning nothing is correct in that case, not a bug
@@ -1692,8 +1702,16 @@ function applyColorToNode(node, hex){
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats){
       if (m.color) m.color.copy(color);
-      // if this mesh is a light source, also update its emissive
-      if (m.emissive && m.emissiveIntensity > 0) m.emissive.copy(color);
+      // if this mesh is a light source, also update its emissive - same
+      // _editOrigEmissive rule as setGlow(): if the editor's highlight tint
+      // is currently showing on this material, update what will be
+      // restored on close instead of overwriting the visible tint, so
+      // recoloring a light-role part while its editor panel is open
+      // doesn't get reverted to the pre-edit color when the panel closes
+      if (m.emissive && m.emissiveIntensity > 0){
+        if (m._editOrigEmissive !== undefined) m._editOrigEmissive = color.getHex();
+        else m.emissive.copy(color);
+      }
     }
   });
 }
@@ -2828,6 +2846,10 @@ function updateMovement(dt){
 
   if (mode==='fly'){
     st.velY = 0;
+    // fly mode never touches the walk/teleport ground-snap branch below, so
+    // a stale wasCrouchingXR=true from before switching to fly would wrongly
+    // bypass the step-limit safety check for one frame after switching back
+    st.wasCrouchingXR = false;
     tryMove(dx, dz);
     player.position.y = Math.max(0, player.position.y + iy*speed*dt);
   } else {
