@@ -2026,7 +2026,8 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-document.getElementById('buildVer').textContent = 'build 2026-07-13.1';
+const BUILD_VERSION = 'build 2026-07-13.2';
+document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
   '| hover:', matchMedia('(hover: hover)').matches,
@@ -2245,7 +2246,7 @@ function drawVRDebug(){
   const ctx = vrDebug.ctx;
   ctx.fillStyle = 'rgba(16,19,24,0.9)'; ctx.fillRect(0,0,512,256);
   ctx.fillStyle = '#e0a43c'; ctx.font = 'bold 20px monospace';
-  ctx.fillText('VR DEBUG  build 2026-07-13.1', 10, 26);
+  ctx.fillText('VR DEBUG  ' + BUILD_VERSION, 10, 26);
   ctx.font = '18px monospace'; ctx.fillStyle = '#cfd6e2';
   const session = renderer.xr.getSession();
   const srcs = session ? [...session.inputSources] : [];
@@ -2598,7 +2599,7 @@ const WATCH_ACTIVATE_ANGLE = 100;   // degrees: palm-up must face within this of
 const WATCH_DEACTIVATE_ANGLE = 120; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
 const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
 const WATCH_ACTIVATE_MS = 350;     // dwell time to open
-const WATCH_OFFSET = new THREE.Vector3(0, 0.16, -0.02); // local up/forward offset from the controller grip, in meters - raised so the menu clears the controller model instead of sitting near-flush with it
+const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // world-up offset + horizontal nudge toward the headset, in meters
 
 function checkWatchPose(){
   if (!renderer.xr.isPresenting) return;
@@ -2665,16 +2666,20 @@ function checkWatchPose(){
 function positionVRWatch(grip){
   grip.updateMatrixWorld(true);
   const pos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
-  // Offset above and slightly forward of the controller, so the menu clears
-  // the controller model instead of overlapping it. transformDirection()
-  // normalizes, so apply it to pure unit axes and scale each separately
-  // rather than transforming WATCH_OFFSET directly.
-  const up = new THREE.Vector3(0, 1, 0).transformDirection(grip.matrixWorld);
-  const fwd = new THREE.Vector3(0, 0, 1).transformDirection(grip.matrixWorld);
-  pos.addScaledVector(up, WATCH_OFFSET.y).addScaledVector(fwd, WATCH_OFFSET.z);
+  camera.getWorldPosition(tmpV);
+  // Offset in world space, not grip-local: the watch-check gesture itself
+  // rotates the wrist so the grip's own local "up" axis no longer points
+  // up in any useful sense (it can end up sideways or pointing back down),
+  // which is why a transformDirection()-based offset didn't visually sit
+  // above the controller. True world-up plus a horizontal nudge toward the
+  // headset reliably clears the controller model instead.
+  const towardHead = new THREE.Vector3().subVectors(tmpV, pos);
+  towardHead.y = 0;
+  if (towardHead.lengthSq() > 1e-6) towardHead.normalize(); else towardHead.set(0, 0, 1);
+  pos.y += WATCH_OFFSET.y;
+  pos.addScaledVector(towardHead, WATCH_OFFSET.z);
   vrWatch.group.position.copy(pos);
   // Face the camera
-  camera.getWorldPosition(tmpV);
   vrWatch.group.lookAt(tmpV);
 }
 
