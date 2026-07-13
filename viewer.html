@@ -277,7 +277,14 @@ Edit mode + AI run on flat screens only.
   </div>
 </div>
 
-<input type="file" id="file" accept=".glb,.gltf,.json" hidden>
+<!-- accept lists both extensions AND MIME types: Android/Quest's system file
+     picker (Storage Access Framework) filters by MIME type, and .glb has no
+     registered MIME association on stock Android - an extension-only accept
+     can make cloud-backed providers (Drive, etc.) in the picker show an
+     empty folder even when the file is right there. readFile() below
+     validates by filename anyway, so widening this can't let anything
+     invalid through. -->
+<input type="file" id="file" accept=".glb,.gltf,.json,model/gltf-binary,model/gltf+json,application/json,application/octet-stream" hidden>
 <input type="file" id="ovfile" accept=".json" hidden>
 
 <script type="importmap">
@@ -2045,7 +2052,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.9';
+const BUILD_VERSION = 'build 2026-07-13.10';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
