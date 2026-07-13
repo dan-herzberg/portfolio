@@ -2026,7 +2026,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.5';
+const BUILD_VERSION = 'build 2026-07-13.6';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2450,7 +2450,7 @@ function hideVRWristMenu(){
 
 /* ============================== VR watch menu (gaze-activated) ============================== */
 const vrWatch = { group: new THREE.Group(), visible: false, buttons: [], sliderParts: null,
-  activateTimer: 0, wearGrip: null };
+  activateTimer: 0, deactivateTimer: 0, wearGrip: null, pokeActive: null };
 vrWatch.group.visible = false;
 scene.add(vrWatch.group);
 
@@ -2600,6 +2600,7 @@ const WATCH_ACTIVATE_ANGLE = 110;   // degrees: back of hand must face within th
 const WATCH_DEACTIVATE_ANGLE = 130; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
 const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
 const WATCH_ACTIVATE_MS = 350;     // dwell time to open
+const WATCH_DEACTIVATE_MS = 250;   // dwell time before closing - absorbs a single bad tracking frame so a stray glitch (or the other hand momentarily nearing the face to poke a button) doesn't snap the menu shut and let the other controller race in to reopen it
 const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // world-up offset + horizontal nudge toward the headset, in meters
 
 // Angle between a grip's back-of-hand direction and the direction from that
@@ -2643,9 +2644,12 @@ function checkWatchPose(){
     vrWatchDebug.angle = angle;
     vrWatchDebug.thresh = WATCH_DEACTIVATE_ANGLE;
     if (dist <= WATCH_ACTIVATE_DIST && angle < WATCH_DEACTIVATE_ANGLE){
+      vrWatch.deactivateTimer = 0;
       positionVRWatch(grip);
+      updateVRWatchPoke(grip);
     } else {
-      hideVRWatch();
+      vrWatch.deactivateTimer += 16.67;
+      if (vrWatch.deactivateTimer >= WATCH_DEACTIVATE_MS) hideVRWatch();
     }
     return;
   }
@@ -2696,6 +2700,8 @@ function positionVRWatch(grip){
 function showVRWatch(grip, pos){
   vrWatch.visible = true;
   vrWatch.group.visible = true;
+  vrWatch.deactivateTimer = 0;
+  vrWatch.pokeActive = null;
   positionVRWatch(grip);
   updateVRWatchStats();
   // Sync slider position
@@ -2707,7 +2713,49 @@ function hideVRWatch(){
   vrWatch.visible = false;
   vrWatch.group.visible = false;
   vrWatch.activateTimer = 0;
+  vrWatch.deactivateTimer = 0;
   vrWatch.wearGrip = null;
+  vrWatch.pokeActive = null;
+}
+
+// Poke-based interaction: the OTHER hand's controller physically touching a
+// button is far more reliable than aiming a laser ray at a menu mounted a
+// few inches from your own face - short-range ray aiming amplifies every
+// bit of hand tremor into a big miss. Fires a button's action on the rising
+// edge of contact (retreat and poke again to press twice); the slider
+// updates continuously while touched, since dragging is the expected
+// gesture there.
+function updateVRWatchPoke(wearGrip){
+  let pokeGrip = null;
+  for (const c of controllers){
+    const g = c.userData.grip;
+    if (g && g !== wearGrip){ pokeGrip = g; break; }
+  }
+  if (!pokeGrip){ vrWatch.pokeActive = null; return; }
+
+  pokeGrip.updateMatrixWorld(true);
+  const pokePos = new THREE.Vector3().setFromMatrixPosition(pokeGrip.matrixWorld);
+
+  let hit = null;
+  for (const btn of vrWatch.buttons){
+    const local = btn.worldToLocal(pokePos.clone());
+    const p = btn.geometry.parameters;
+    const halfW = (p.width || 0.03) / 2 + 0.03;   // generous margin: hit-test
+    const halfH = (p.height || 0.03) / 2 + 0.03;  // is in the button's own
+    if (Math.abs(local.x) < halfW && Math.abs(local.y) < halfH && Math.abs(local.z) < 0.06){
+      hit = btn;
+      break;
+    }
+  }
+
+  if (hit && hit.userData.isSlider){
+    const local = hit.worldToLocal(pokePos.clone());
+    const pct = THREE.MathUtils.clamp((local.x + vrWatch.sliderParts.trackW/2) / vrWatch.sliderParts.trackW, 0, 1);
+    updateVRWatchSlider(pct);
+  } else if (hit && hit !== vrWatch.pokeActive && hit.userData.vrWatchAction){
+    hit.userData.vrWatchAction();
+  }
+  vrWatch.pokeActive = hit;
 }
 const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false,
   editBtn:false, aDown:0, xDown:0, stickFwdTele:false, dbgBtn:false };
