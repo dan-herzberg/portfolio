@@ -2594,8 +2594,8 @@ function updateVRWatchSlider(pct){
 }
 
 // Check if either controller is in "look at watch" pose
-const WATCH_ACTIVATE_ANGLE = 50;   // degrees: palm-up must face within this of head direction
-const WATCH_DEACTIVATE_ANGLE = 70; // hysteresis: wider angle to close
+const WATCH_ACTIVATE_ANGLE = 90;    // degrees: palm-up must face within this of head direction
+const WATCH_DEACTIVATE_ANGLE = 110; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
 const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
 const WATCH_ACTIVATE_MS = 350;     // dwell time to open
 const WATCH_OFFSET = new THREE.Vector3(0, 0.08, -0.02); // offset from controller
