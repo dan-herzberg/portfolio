@@ -2594,11 +2594,11 @@ function updateVRWatchSlider(pct){
 }
 
 // Check if either controller is in "look at watch" pose
-const WATCH_ACTIVATE_ANGLE = 90;    // degrees: palm-up must face within this of head direction
-const WATCH_DEACTIVATE_ANGLE = 110; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
+const WATCH_ACTIVATE_ANGLE = 100;   // degrees: palm-up must face within this of head direction
+const WATCH_DEACTIVATE_ANGLE = 120; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
 const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
 const WATCH_ACTIVATE_MS = 350;     // dwell time to open
-const WATCH_OFFSET = new THREE.Vector3(0, 0.08, -0.02); // offset from controller
+const WATCH_OFFSET = new THREE.Vector3(0, 0.16, -0.02); // local up/forward offset from the controller grip, in meters - raised so the menu clears the controller model instead of sitting near-flush with it
 
 function checkWatchPose(){
   if (!renderer.xr.isPresenting) return;
@@ -2665,9 +2665,13 @@ function checkWatchPose(){
 function positionVRWatch(grip){
   grip.updateMatrixWorld(true);
   const pos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
-  // Offset slightly above the wrist
+  // Offset above and slightly forward of the controller, so the menu clears
+  // the controller model instead of overlapping it. transformDirection()
+  // normalizes, so apply it to pure unit axes and scale each separately
+  // rather than transforming WATCH_OFFSET directly.
   const up = new THREE.Vector3(0, 1, 0).transformDirection(grip.matrixWorld);
-  pos.addScaledVector(up, 0.08);
+  const fwd = new THREE.Vector3(0, 0, 1).transformDirection(grip.matrixWorld);
+  pos.addScaledVector(up, WATCH_OFFSET.y).addScaledVector(fwd, WATCH_OFFSET.z);
   vrWatch.group.position.copy(pos);
   // Face the camera
   camera.getWorldPosition(tmpV);
