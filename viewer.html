@@ -2037,7 +2037,15 @@ function setTouchMode(touch){
   isTouch = touch;
   document.getElementById('mobile').style.display = isTouch ? 'block' : 'none';
   document.getElementById('vslide').style.display = (isTouch && mode==='fly') ? 'flex' : 'none';
-  setHudCollapsed(isTouch);
+  // Deliberately NOT calling setHudCollapsed() here. This fires on every
+  // pointerdown/pointermove correction, and on some browsers (Quest's flat
+  // 2D mode reportedly among them) a single press/release can report
+  // inconsistent pointerType across its own down/move/up sequence - forcing
+  // the HUD open/closed in lockstep with that made the whole panel (Load
+  // button included) collapse on press and pop back open on release,
+  // effectively making every button unusable. HUD collapse is a one-time
+  // initial guess (below) plus manual control via the toggle button; it
+  // has no business being re-forced by input-type detection at all.
   console.log('[input] corrected isTouch ->', isTouch, 'from a live', touch ? 'touch/pen' : 'mouse', 'event');
 }
 addEventListener('pointerdown', e => {
