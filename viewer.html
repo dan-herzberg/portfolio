@@ -141,14 +141,12 @@
     </div>
     <div class="panel">
       <div class="label">Movement</div>
-      <div class="row">
-        <button id="mWalk" class="on">Walk</button>
-        <button id="mFly">Fly</button>
-        <button id="mTele">Teleport</button>
-      </div>
-      <div class="row" style="margin-top:6px;align-items:center;">
+      <div class="row" style="align-items:center;">
         <span class="mono" style="font-size:11px;color:var(--dim);">Fly speed</span>
         <input type="range" id="flySpeedSlider" min="1" max="30" step="0.5" value="6.5" style="flex:1;min-width:80px;">
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <span class="mono" style="font-size:10px;color:var(--dim);">Double-tap Jump to toggle fly</span>
       </div>
     </div>
     <div class="panel mono" id="stats" style="font-size:11px;color:var(--dim);">no scene loaded<br><span id="buildVer" style="color:var(--dim);font-size:10px;"></span></div>
@@ -175,26 +173,28 @@
 DESKTOP
 Click canvas     lock mouse look
 WASD             move
-Space / C        jump | up-down (fly)
+Space            jump (double-tap: toggle fly)
+C                up-down (fly only)
 Up / Down        up-down (fly only)
-Click            interact / teleport
+Click            interact
 E                grab / release part
 Wheel            push-pull held part
 R                reset part to home
 T                edit aimed part (role, hinge, lock, level)
-1 2 3            walk fly teleport
 
 MOBILE
 Left stick       move
 Drag right side  look
 Buttons          interact grab reset
+Jump             double-tap: toggle fly
 
 QUEST 2
 Left stick       move
 Right stick      snap turn
-Trigger          interact / teleport
+Right stick fwd  hold: aim teleport, release: go
+Trigger          interact
 Grip             grab / release
-A                cycle mode
+A                jump (double-tap: toggle fly)
 X                reset all parts
 
 AI button (bottom right): natural-language
@@ -409,6 +409,18 @@ teleportMarker.visible = false;
 teleportMarker.renderOrder = 1;
 scene.add(teleportMarker);
 
+// VR-only: armed by holding the right stick forward (see pollXRInput),
+// drives the preview line + marker in updateVRTeleportPreview()
+const vrTeleport = { armed: false, valid: false, point: new THREE.Vector3() };
+const teleportLine = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.LineBasicMaterial({ color:0xe0a43c, transparent:true, opacity:0.8 })
+);
+teleportLine.name = '__teleportLine';
+teleportLine.visible = false;
+teleportLine.renderOrder = 1;
+scene.add(teleportLine);
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
@@ -416,8 +428,7 @@ addEventListener('resize', () => {
 });
 
 /* ============================== state ============================== */
-const MODES = ['walk','fly','teleport'];
-let mode = 'walk';
+let flying = false;   // base movement is always walk; fly toggles on/off via double-tap jump
 let worldRoot = null;
 let collidables = [floor];
 let interactables = [];        // {kind:'door'|'switch', ...}
@@ -479,17 +490,28 @@ function setHint(msg){
   hintEl.style.display = msg ? 'block' : 'none';
   if (msg) hintEl.textContent = msg;
 }
-function setMode(m){
-  mode = m;
-  for (const [id,name] of [['mWalk','walk'],['mFly','fly'],['mTele','teleport']])
-    document.getElementById(id).classList.toggle('on', name===m);
-  document.getElementById('vslide').style.display = (isTouch && m==='fly') ? 'flex' : 'none';
-  if (m==='fly') st.velY = 0;
-  toast('Mode: ' + m);
+function setFlying(on){
+  flying = on;
+  document.getElementById('vslide').style.display = (isTouch && flying) ? 'flex' : 'none';
+  if (flying) st.velY = 0;
+  toast(flying ? 'Fly mode on' : 'Fly mode off');
 }
-document.getElementById('mWalk').onclick = ()=>setMode('walk');
-document.getElementById('mFly').onclick = ()=>setMode('fly');
-document.getElementById('mTele').onclick = ()=>setMode('teleport');
+// Jump is double-purpose: a normal tap jumps (if grounded and not already
+// flying); a second tap within the window toggles fly instead. Single
+// entry point for desktop Space, the mobile Jump button, and VR's A
+// button, so the gesture behaves identically everywhere.
+let lastJumpTapTime = 0;
+const DOUBLE_JUMP_MS = 350;
+function handleJumpPress(){
+  const now = performance.now();
+  if (now - lastJumpTapTime < DOUBLE_JUMP_MS){
+    setFlying(!flying);
+    lastJumpTapTime = 0;   // consume so a fast triple-tap doesn't re-toggle
+  } else {
+    lastJumpTapTime = now;
+    if (!flying && st.grounded){ st.velY = 4.4; st.grounded = false; }
+  }
+}
 document.getElementById('helpBtn').onclick = ()=>{
   const h = document.getElementById('help');
   h.style.display = h.style.display==='block' ? 'none' : 'block';
@@ -1201,15 +1223,6 @@ function tryInteract(raycaster, fromPos){
   raycaster.far = 4;
   const hi = firstHit(raycaster.intersectObjects(interactMeshes, false));
   if (hi){ activate(hi.object.userData.inter, fromPos); return true; }
-  if (mode === 'teleport'){
-    raycaster.far = 30;
-    const hg = firstHit(raycaster.intersectObjects(collidables, false));
-    if (hg && hg.face && hg.face.normal.clone()
-        .transformDirection(hg.object.matrixWorld).y > 0.6){
-      teleportTo(hg.point);
-      return true;
-    }
-  }
   return false;
 }
 
@@ -1884,11 +1897,11 @@ async function runCommand(){
     '{"op":"setSwitch","path":P,"on":true|false}. ' +
     '{"op":"snapPart","path":P} returns a part to its home position. ' +
     '{"op":"snapAll"} resets every part, door, and switch. ' +
-    '{"op":"setMode","mode":"walk|fly|teleport"}. ' +
+    '{"op":"setMode","mode":"walk|fly"} switches flying on or off (teleport is a VR-only gesture, not settable). ' +
     '{"op":"setSpeed","walk":number,"fly":number} in m/s, either key optional. ' +
     '{"op":"setColor","path":P,"color":"#rrggbb"} sets part color; use null to clear. ' +
     'Use only paths from this inventory, matched by closest name. Inventory: ' + JSON.stringify(sceneInventory()) +
-    ' Current mode: ' + mode + ', walkSpeed ' + walkSpeed + ', flySpeed ' + flySpeed + '.';
+    ' Currently ' + (flying ? 'flying' : 'walking') + ', walkSpeed ' + walkSpeed + ', flySpeed ' + flySpeed + '.';
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1969,7 +1982,7 @@ function applyOps(ops){
       }
       case 'snapAll': resetAll(); applied++; break;
       case 'setMode':
-        if (MODES.includes(op.mode)){ setMode(op.mode); applied++; }
+        if (op.mode === 'walk' || op.mode === 'fly'){ setFlying(op.mode === 'fly'); applied++; }
         break;
       case 'setSpeed':
         if (op.walk > 0) walkSpeed = Math.min(op.walk, 15);
@@ -2026,7 +2039,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.7';
+const BUILD_VERSION = 'build 2026-07-13.8';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2037,7 +2050,7 @@ function setTouchMode(touch){
   if (touch === isTouch) return;
   isTouch = touch;
   document.getElementById('mobile').style.display = isTouch ? 'block' : 'none';
-  document.getElementById('vslide').style.display = (isTouch && mode==='fly') ? 'flex' : 'none';
+  document.getElementById('vslide').style.display = (isTouch && flying) ? 'flex' : 'none';
   // Deliberately NOT calling setHudCollapsed() here. This fires on every
   // pointerdown/pointermove correction, and on some browsers (Quest's flat
   // 2D mode reportedly among them) a single press/release can report
@@ -2071,11 +2084,9 @@ setHudCollapsed(uaMobile && !hasFinePointer);
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   keys[e.code] = true;
-  if (e.code==='Digit1') setMode('walk');
-  if (e.code==='Digit2') setMode('fly');
-  if (e.code==='Digit3') setMode('teleport');
+  if (e.code==='Space' && !e.repeat) handleJumpPress();
   if (e.code==='KeyT') openEditor();
-  if (e.code==='KeyC' && mode !== 'fly') st.crouching = !st.crouching;
+  if (e.code==='KeyC' && !flying) st.crouching = !st.crouching;
   if (e.code==='KeyE') grabWith(camera, centerRay());
   if (e.code==='KeyR'){
     const rec = held.get(camera);
@@ -2185,10 +2196,10 @@ hold('mSnap', ()=>{
   const rec = held.get(camera);
   if (rec){ held.delete(camera); snapHome(rec); }
 });
-// Jump works in every mode: walk/teleport = jump off the ground,
-// fly = ascend while held (same as the Up button)
+// Jump: walking = jump off the ground (double-tap toggles fly), flying =
+// ascend while held (same as the Up button)
 hold('mJump',
-  ()=>{ if (mode==='fly') mJumpHeld = true; else if (st.grounded) st.velY = 4.4; },
+  ()=>{ mJumpHeld = true; handleJumpPress(); },
   ()=>mJumpHeld = false);
 hold('mEdit', ()=>openEditor());
 hold('mCrouch', ()=>{ st.crouching = !st.crouching;
@@ -2272,7 +2283,8 @@ function drawVRDebug(){
     (wd.angle?.toFixed(0) ?? '-') + '/' + (wd.thresh ?? '-') +
     '  roll=' + (wd.roll?.toFixed(0) ?? '-') + '/' + WATCH_ROLL_ANGLE);
   put('Y presses: ' + vrEditDebug.yPresses + '  last: ' + vrEditDebug.lastAttempt.slice(0,28));
-  put('mode: ' + mode + '  crouch: ' + st.crouching);
+  put('flying: ' + flying + '  crouch: ' + st.crouching +
+    '  tele: ' + vrTeleport.armed + '/' + vrTeleport.valid);
   if (vrLastError){ ctx.fillStyle = '#e05252'; put('ERR: ' + vrLastError.slice(0,36)); }
   vrDebug.tex.needsUpdate = true;
 }
@@ -2781,9 +2793,9 @@ function updateVRWatchPoke(wearGrip){
   }
   vrWatch.pokeActive = hit;
 }
-const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false,
-  editBtn:false, aDown:0, xDown:0, stickFwdTele:false, dbgBtn:false };
-const XR_HOLD_MS = 500;  // hold threshold for A=fly, X=resetAll
+const xrLatch = { snap:0, jumpBtn:false, resetBtn:false, crouchBtn:false,
+  editBtn:false, xDown:0, dbgBtn:false, teleBtn:false };
+const XR_HOLD_MS = 500;  // hold threshold for X=resetAll
 function pollXRInput(dt){
   const session = renderer.xr.getSession();
   if (!session) return { mx:0, mz:0 };
@@ -2832,17 +2844,6 @@ function pollXRInput(dt){
       }
       xrLatch.editBtn = !!y?.pressed;
 
-      // Left stick forward held = temporary teleport mode
-      const fwd = (gp.axes[3] || 0) < -0.7;
-      if (fwd && !xrLatch.stickFwdTele && mode !== 'teleport'){
-        xrLatch.stickFwdTele = true;
-        xrLatch.prevMode = mode;
-        setMode('teleport');
-      } else if (!fwd && xrLatch.stickFwdTele){
-        xrLatch.stickFwdTele = false;
-        if (xrLatch.prevMode) setMode(xrLatch.prevMode);
-      }
-
     } else if (src.handedness === 'right'){
       const sx = gp.axes[2] || 0;
       if (Math.abs(sx) > 0.6 && xrLatch.snap === 0){
@@ -2850,26 +2851,30 @@ function pollXRInput(dt){
         snapTurn(-Math.sign(sx) * Math.PI/6);
       } else if (Math.abs(sx) < 0.3) xrLatch.snap = 0;
 
-      // A button: tap = jump, hold = fly mode
+      // A button: jump (double-tap toggles fly), same trigger as desktop
+      // Space / the mobile Jump button
       const a = gp.buttons[4];
-      if (a?.pressed && !xrLatch.modeBtn){
-        xrLatch.aDown = now;
-      }
-      if (!a?.pressed && xrLatch.modeBtn){
-        const held_time = now - xrLatch.aDown;
-        if (held_time >= XR_HOLD_MS){
-          setMode(mode === 'fly' ? 'walk' : 'fly');
-        } else {
-          // tap: jump
-          if (st.grounded){ st.velY = 4.4; st.grounded = false; }
-        }
-      }
-      xrLatch.modeBtn = !!a?.pressed;
+      if (a?.pressed && !xrLatch.jumpBtn) handleJumpPress();
+      xrLatch.jumpBtn = !!a?.pressed;
 
       // B button: crouch toggle
       const b = gp.buttons[5];
       if (b?.pressed && !xrLatch.crouchBtn) st.crouching = !st.crouching;
       xrLatch.crouchBtn = !!b?.pressed;
+
+      // Right stick forward: hold to arm the teleport preview (arc target +
+      // line, drawn in updateVRTeleportPreview), release to teleport to
+      // wherever it landed. Always available alongside walking rather than
+      // a mode you have to switch into - the classic VR comfort-locomotion
+      // pattern (point, preview, release) used to cut motion sickness.
+      const fwd = (gp.axes[3] || 0) < -0.7;
+      if (fwd && !xrLatch.teleBtn){
+        vrTeleport.armed = true;
+      } else if (!fwd && xrLatch.teleBtn){
+        vrTeleport.armed = false;
+        if (vrTeleport.valid) teleportTo(vrTeleport.point);
+      }
+      xrLatch.teleBtn = fwd;
     }
   }
   return { mx, mz };
@@ -2935,15 +2940,14 @@ function updateMovement(dt){
   if (keys['KeyS']) iz += 1;
   if (keys['KeyA']) ix -= 1;
   if (keys['KeyD']) ix += 1;
-  if (mode==='fly'){
+  if (flying){
     if (keys['Space'] || keys['ArrowUp']) iy += 1;
     if (keys['KeyC'] || keys['ShiftLeft'] || keys['ArrowDown']) iy -= 1;
     if (mUpHeld || mJumpHeld) iy += 1;
     if (mDownHeld) iy -= 1;
-  } else {
-    if (keys['Space'] && st.grounded){ st.velY = 4.4; st.grounded = false; }
-    // crouch toggle via C key (desktop) — handled in keydown
   }
+  // jump-off-the-ground is handled on the discrete keydown/press edge (see
+  // handleJumpPress()), not polled here, so a single tap can't double-fire
   ix += joy.x; iz += joy.y;
 
   let xr = { mx:0, mz:0 };
@@ -2952,7 +2956,7 @@ function updateMovement(dt){
   const L = Math.hypot(ix, iz);
   if (L > 1){ ix/=L; iz/=L; }
 
-  const speed = mode==='fly' ? flySpeed : walkSpeed;
+  const speed = flying ? flySpeed : walkSpeed;
   let yaw;
   if (inXR){ camera.getWorldDirection(tmpV); yaw = Math.atan2(-tmpV.x, -tmpV.z); }
   else yaw = st.yaw;
@@ -2961,10 +2965,10 @@ function updateMovement(dt){
   const dx = (ix*cos + iz*sin) * speed * dt;
   const dz = (iz*cos - ix*sin) * speed * dt;
 
-  if (mode==='fly'){
+  if (flying){
     st.velY = 0;
-    // fly mode never touches the walk/teleport ground-snap branch below, so
-    // a stale wasCrouchingXR=true from before switching to fly would wrongly
+    // fly never touches the walk ground-snap branch below, so a stale
+    // wasCrouchingXR=true from before switching to fly would wrongly
     // bypass the step-limit safety check for one frame after switching back
     st.wasCrouchingXR = false;
     tryMove(dx, dz);
@@ -2978,7 +2982,7 @@ function updateMovement(dt){
     // tracks real head position, so we lower the whole rig), not a
     // per-frame subtraction - a `-= 0.6` every frame never converges and
     // sinks the player through the floor indefinitely
-    const crouchingXR = inXR && st.crouching && mode !== 'fly';
+    const crouchingXR = inXR && st.crouching;
     const restY = gy + (crouchingXR ? -0.6 : 0);
     st.velY -= 9.8*dt;
     player.position.y += st.velY*dt;
@@ -2998,12 +3002,12 @@ function updateMovement(dt){
     if (player.position.y < -20){ player.position.set(0,2,4); st.velY=0; }
   }
 
-  // smooth camera height for crouch (walk/teleport only)
+  // smooth camera height for crouch (walk only)
   // Desktop/mobile: interpolate camera Y between standing (1.6) and crouching (0.9)
   // VR: the camera tracks real head position, so we offset the entire player rig
   // downward by the crouch delta — effectively lowering your viewpoint
   if (!inXR){
-    const targetY = st.crouching && mode !== 'fly' ? 0.9 : 1.6;
+    const targetY = st.crouching && !flying ? 0.9 : 1.6;
     camera.position.y = THREE.MathUtils.damp(camera.position.y, targetY, 12, dt);
   }
 }
@@ -3022,31 +3026,19 @@ function updateActionButtons(av){
     const label = held.get(camera) ? 'Release' : 'Grab';
     if (g.textContent !== label) g.textContent = label;
   }
-  const ib = document.getElementById('mInteract');
-  if (ib){
-    const label = av.teleport ? 'Teleport' : 'Interact';
-    if (ib.textContent !== label) ib.textContent = label;
-  }
 }
 
 function updateHover(){
   if (renderer.xr.isPresenting){ updateLasers(); setHoverGlow(null); setHint(''); return; }
   const holding = held.get(camera);
   // holding something always allows release (Grab btn) and reset
-  const av = { interact:false, grab:!!holding, reset:!!holding, edit:false, teleport:false };
+  const av = { interact:false, grab:!!holding, reset:!!holding, edit:false };
   const r = centerRay();
   // the editor opens on any aimed part, grabbable or not
   r.far = 4.5;
   av.edit = !!firstHit(r.intersectObjects(collidables, false));
   r.far = 4;
   const hi = firstHit(r.intersectObjects(interactMeshes, false));
-  // in teleport mode, aiming at a teleportable (upward-facing) surface that
-  // isn't an interactable relabels the Interact button as Teleport - the
-  // marker's visibility is exactly that test, updated every frame
-  if (!hi && mode === 'teleport' && teleportMarker.visible){
-    av.teleport = true;
-    av.interact = true;
-  }
   if (hi){
     setHoverGlow(null);
     const it = hi.object.userData.inter;
@@ -3079,20 +3071,46 @@ function updateHover(){
   updateActionButtons(av);
 }
 
-function updateTeleportMarker(){
-  if (mode !== 'teleport' || renderer.xr.isPresenting || !worldRoot){
+// VR-only teleport preview: while armed (right stick held forward, see
+// pollXRInput), casts the right controller's aim ray out to find a valid
+// (upward-facing) landing spot, and shows the ring marker + a line from the
+// controller to it. Releasing the stick with a valid spot showing performs
+// the actual teleport (also in pollXRInput, since that's where the release
+// edge is detected).
+function updateVRTeleportPreview(){
+  if (!renderer.xr.isPresenting || !vrTeleport.armed || !worldRoot){
+    vrTeleport.valid = false;
     teleportMarker.visible = false;
+    teleportLine.visible = false;
     return;
   }
-  const r = centerRay();
+  const rc = controllers.find(c => c.userData.handedness === 'right');
+  if (!rc){
+    vrTeleport.valid = false;
+    teleportMarker.visible = false;
+    teleportLine.visible = false;
+    return;
+  }
+  const r = rayFrom(rc);
   r.far = 30;
   const hit = firstHit(r.intersectObjects(collidables, false));
   if (hit && hit.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y > 0.6){
+    vrTeleport.valid = true;
+    vrTeleport.point.copy(hit.point);
     teleportMarker.position.set(hit.point.x, hit.point.y + 0.02, hit.point.z);
     teleportMarker.scale.setScalar(1 + 0.08 * Math.sin(clock.elapsedTime * 4));
     teleportMarker.visible = true;
+    rc.getWorldPosition(tmpV3);
+    const pos = teleportLine.geometry.attributes.position;
+    pos.setXYZ(0, tmpV3.x, tmpV3.y, tmpV3.z);
+    pos.setXYZ(1, hit.point.x, hit.point.y, hit.point.z);
+    pos.needsUpdate = true;
+    teleportLine.geometry.computeBoundingSphere();
+    teleportLine.visible = true;
   } else {
+    vrTeleport.valid = false;
     teleportMarker.visible = false;
+    teleportLine.visible = false;
   }
 }
 
@@ -3308,8 +3326,8 @@ renderer.setAnimationLoop(() => {
     if (hoverTick > 0.08){ hoverTick = 0; updateHover(); }
 
     // every frame, not throttled like updateHover(), so the marker tracks
-    // smoothly as the camera moves
-    updateTeleportMarker();
+    // smoothly as the controller moves
+    updateVRTeleportPreview();
 
     // physics engine step for released parts
     physicsStep(dt);

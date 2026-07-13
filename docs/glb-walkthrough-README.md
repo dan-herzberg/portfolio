@@ -25,19 +25,19 @@ Nothing is grabbable by default — see **Grabbing parts** below.
 
 ## Controls
 
-**Desktop:** click canvas to lock the mouse. WASD move, Space or Up arrow to jump (walk) or ascend (fly), C, Shift, or Down arrow to descend (fly). Click = interact/teleport. E grab/release, mouse wheel push/pull, R reset the aimed/held part, T edit aimed part, 1/2/3 switch mode.
+Movement is always walk by default - there's no mode picker. **Fly** toggles on/off by double-tapping Jump (Space, the mobile Jump button, or Quest's A button) within about a third of a second; a single tap just jumps. **Teleport** is a VR-only gesture that's available at all times alongside walking, not a mode you switch into (see Quest 2 below).
 
-**Mobile:** left stick moves, drag the right half to look. Buttons: Interact, Grab, Reset, Jump, Edit. Up/Down buttons appear in fly mode.
+**Desktop:** click canvas to lock the mouse. WASD move, Space to jump (double-tap: toggle fly), C/Shift/Down arrow to descend while flying, Up arrow to ascend while flying. Click = interact. E grab/release, mouse wheel push/pull, R reset the aimed/held part, T edit aimed part.
 
-**Quest 2:** left stick moves, right stick snap-turns. Trigger = interact or teleport. Grip = grab/release. A cycles mode, X resets the whole scene (parts, doors, switches, and your position).
+**Mobile:** left stick moves, drag the right half to look. Buttons: Interact, Grab, Reset, Jump (double-tap: toggle fly), Edit. Up/Down buttons appear while flying.
+
+**Quest 2:** left stick moves, right stick snap-turns. Trigger = interact. Grip = grab/release. A = jump (double-tap: toggle fly). X resets the whole scene (parts, doors, switches, and your position). Hold the **right stick forward** to arm a teleport preview - a line and a ring show where you'd land - and release it to teleport there; let go without a valid target and nothing happens. This point-and-release pattern is the standard VR comfort-locomotion gesture, used specifically to cut motion sickness versus continuous joystick movement.
 
 **Touch detection:** the app decides whether to show the on-screen joystick using the primary pointing device's precision (`pointer: coarse`) plus a mobile user-agent/client-hints check, not just "is a touchscreen present" - so a touchscreen laptop with a mouse attached still reads as desktop.
 
 **Collapsing the panels:** the small circular button above the Scene panel minimizes the whole left-side panel stack down to just that button, leaving the full view unobstructed — click it again to bring the panels back. It starts collapsed by default on touch devices, since the panel stack eats a lot of a phone screen.
 
-**Teleport mode** shows a ring on the floor wherever you're currently aiming, so you can see exactly where you'll land before you click/trigger.
-
-**Button availability:** on touch devices, the on-screen Interact / Grab / Reset / Edit buttons light up when aiming at something that action currently applies to, and the Grab button reads **Release** while you're holding a part. In teleport mode, the Interact button reads **Teleport** while aiming at a spot you can actually teleport to.
+**Button availability:** on touch devices, the on-screen Interact / Grab / Reset / Edit buttons light up when aiming at something that action currently applies to, and the Grab button reads **Release** while you're holding a part.
 
 **Light/dark environment:** the **Light mode / Dark mode** button in the Scene panel swaps the surrounding environment (sky, fog, ground plane, lighting intensity) between a dark studio look and a bright one. Loaded models keep their own materials either way.
 
