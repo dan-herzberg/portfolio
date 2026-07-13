@@ -2226,6 +2226,11 @@ camera.add(vrDebug.mesh);
 vrDebug.mesh.visible = false;
 let vrFrameCount = 0;
 let vrLastError = '';
+// Live numbers for the two gesture-triggered menus, since neither shows any
+// visible feedback in-headset when its trigger condition just isn't met -
+// without these the debug HUD could only ever say "false", not why.
+let vrWatchDebug = { dist: null, angle: null, thresh: null };
+let vrEditDebug = { yPresses: 0, lastAttempt: 'none yet' };
 function drawVRDebug(){
   if (!vrDebugOn || !renderer.xr.isPresenting){ vrDebug.mesh.visible = false; return; }
   vrDebug.mesh.visible = true;
@@ -2243,6 +2248,10 @@ function drawVRDebug(){
   put('controllers: ' + controllers.length + '  sources: ' + srcs.length);
   put('hands: ' + (hands || 'none'));
   put('watch: ' + vrWatch.visible + '  edit: ' + vrMenu.visible);
+  const wd = vrWatchDebug;
+  put('pose: dist=' + (wd.dist?.toFixed(2) ?? '-') + 'm  angle=' +
+    (wd.angle?.toFixed(0) ?? '-') + '/' + (wd.thresh ?? '-'));
+  put('Y presses: ' + vrEditDebug.yPresses + '  last: ' + vrEditDebug.lastAttempt.slice(0,28));
   put('mode: ' + mode + '  crouch: ' + st.crouching);
   if (vrLastError){ ctx.fillStyle = '#e05252'; put('ERR: ' + vrLastError.slice(0,36)); }
   vrDebug.tex.needsUpdate = true;
@@ -2399,9 +2408,10 @@ function toggleVRWristMenu(){
   const meshes = [];
   if (worldRoot) worldRoot.traverse(o => { if (o.isMesh && !o.userData.isGhost) meshes.push(o); });
   const h = firstHit(r.intersectObjects(meshes, false));
-  if (!h){ toast('Aim at a part, then press Y'); return; }
+  if (!h){ vrEditDebug.lastAttempt = 'no aim hit (' + meshes.length + ' meshes)'; toast('Aim at a part, then press Y'); return; }
   const chain = buildEditChain(h.object);
-  if (!chain.length){ toast('No named part to edit'); return; }
+  if (!chain.length){ vrEditDebug.lastAttempt = 'hit unnamed: ' + (h.object.name || '?'); toast('No named part to edit'); return; }
+  vrEditDebug.lastAttempt = 'opened: ' + chain[0].name;
   vrMenu.targetNode = chain[0];
   vrMenu.targetPath = pathFor(chain[0]);
 
@@ -2600,11 +2610,15 @@ function checkWatchPose(){
 
     // Distance check
     const dist = ctrlPos.distanceTo(headPos);
+    vrWatchDebug.dist = dist;   // diagnostic - kept even if too far to compute an angle below
     if (dist > WATCH_ACTIVATE_DIST) continue;
 
     // Get controller's "up" direction (palm facing direction when holding controller)
     // On Quest Touch controllers, local Y-up points away from the palm (toward the back of the hand)
     // So the palm faces -Y local. We want to detect when the palm faces toward the head.
+    // NOTE: this axis assumption is unverified on real hardware (untestable in the dev
+    // sandbox) - if the watch menu never triggers even at a close, palm-up pose, this is
+    // the first thing to suspect; try (0,1,0) or a different local axis instead of (0,-1,0).
     const palmDir = new THREE.Vector3(0, -1, 0); // palm direction in controller local
     palmDir.transformDirection(grip.matrixWorld).normalize();
 
@@ -2613,6 +2627,8 @@ function checkWatchPose(){
 
     // Angle between palm direction and direction to head
     const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(palmDir.dot(toHead), -1, 1)));
+    vrWatchDebug.angle = angle;
+    vrWatchDebug.thresh = vrWatch.visible ? WATCH_DEACTIVATE_ANGLE : WATCH_ACTIVATE_ANGLE;
 
     const threshold = vrWatch.visible ? WATCH_DEACTIVATE_ANGLE : WATCH_ACTIVATE_ANGLE;
 
@@ -2711,6 +2727,7 @@ function pollXRInput(dt){
       // Y button: toggle wrist menu for editing aimed part
       const y = gp.buttons[5];
       if (y?.pressed && !xrLatch.editBtn){
+        vrEditDebug.yPresses++;   // proves the button itself is being detected
         toggleVRWristMenu();
       }
       xrLatch.editBtn = !!y?.pressed;
