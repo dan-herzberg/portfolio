@@ -2026,7 +2026,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.3';
+const BUILD_VERSION = 'build 2026-07-13.4';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2450,7 +2450,7 @@ function hideVRWristMenu(){
 
 /* ============================== VR watch menu (gaze-activated) ============================== */
 const vrWatch = { group: new THREE.Group(), visible: false, buttons: [], sliderParts: null,
-  activateTimer: 0, activeHand: null };
+  activateTimer: 0, wearGrip: null };
 vrWatch.group.visible = false;
 scene.add(vrWatch.group);
 
@@ -2572,6 +2572,7 @@ function createVRWatchMenu(){
   vrWatch.group.add(bg);
 }
 createVRWatchMenu();
+vrWatch.group.scale.setScalar(0.5); // shrink the whole panel to a real wrist-watch scale
 
 function updateVRWatchStats(){
   if (!vrWatch.statsCtx) return;
@@ -2601,6 +2602,27 @@ const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of 
 const WATCH_ACTIVATE_MS = 350;     // dwell time to open
 const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // world-up offset + horizontal nudge toward the headset, in meters
 
+// Angle between a grip's back-of-hand direction and the direction from that
+// grip to the head. See the axis note on WATCH_ACTIVATE_ANGLE's callers below.
+function watchPoseAngle(grip, headPos){
+  grip.updateMatrixWorld(true);
+  const ctrlPos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
+  const dist = ctrlPos.distanceTo(headPos);
+  // The watch menu should appear when you look at the BACK of your hand
+  // (like checking a real wrist watch), not when your palm faces you.
+  // On Quest Touch controllers, local Y-up points away from the palm,
+  // toward the back of the hand - so we want +Y local facing the head.
+  // NOTE: this axis assumption is unverified on real hardware (untestable
+  // in the dev sandbox) - if the watch menu never triggers even with the
+  // back of your hand held close and facing your face, this is the first
+  // thing to suspect; try (0,-1,0) or a different local axis instead.
+  const handBackDir = new THREE.Vector3(0, 1, 0);
+  handBackDir.transformDirection(grip.matrixWorld).normalize();
+  const toHead = new THREE.Vector3().subVectors(headPos, ctrlPos).normalize();
+  const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(handBackDir.dot(toHead), -1, 1)));
+  return { ctrlPos, dist, angle };
+}
+
 function checkWatchPose(){
   if (!renderer.xr.isPresenting) return;
   const session = renderer.xr.getSession();
@@ -2609,59 +2631,45 @@ function checkWatchPose(){
   camera.getWorldPosition(tmpV); // head position
   const headPos = tmpV.clone();
 
+  // Once open, only track the wrist that opened it - re-scanning both
+  // controllers every frame let the OTHER hand (reaching in near the face
+  // to press a button) occasionally out-compete the actual wrist for the
+  // pose check, causing the menu to jump or snap shut mid-interaction. This
+  // also fully frees the other controller's ray for button interaction.
+  if (vrWatch.visible){
+    const grip = vrWatch.wearGrip;
+    const { dist, angle } = watchPoseAngle(grip, headPos);
+    vrWatchDebug.dist = dist;
+    vrWatchDebug.angle = angle;
+    vrWatchDebug.thresh = WATCH_DEACTIVATE_ANGLE;
+    if (dist <= WATCH_ACTIVATE_DIST && angle < WATCH_DEACTIVATE_ANGLE){
+      positionVRWatch(grip);
+    } else {
+      hideVRWatch();
+    }
+    return;
+  }
+
   for (const c of controllers){
     const grip = c.userData.grip;
     if (!grip) continue;
-    grip.updateMatrixWorld(true);
 
-    // Get controller position
-    const ctrlPos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
-
-    // Distance check
-    const dist = ctrlPos.distanceTo(headPos);
-    vrWatchDebug.dist = dist;   // diagnostic - kept even if too far to compute an angle below
+    const { ctrlPos, dist, angle } = watchPoseAngle(grip, headPos);
+    vrWatchDebug.dist = dist;   // diagnostic - kept even if too far to compute a meaningful angle
+    vrWatchDebug.angle = angle;
+    vrWatchDebug.thresh = WATCH_ACTIVATE_ANGLE;
     if (dist > WATCH_ACTIVATE_DIST) continue;
 
-    // The watch menu should appear when you look at the BACK of your hand
-    // (like checking a real wrist watch), not when your palm faces you.
-    // On Quest Touch controllers, local Y-up points away from the palm,
-    // toward the back of the hand - so we want +Y local facing the head.
-    // NOTE: this axis assumption is unverified on real hardware (untestable
-    // in the dev sandbox) - if the watch menu never triggers even with the
-    // back of your hand held close and facing your face, this is the first
-    // thing to suspect; try (0,-1,0) or a different local axis instead.
-    const handBackDir = new THREE.Vector3(0, 1, 0); // back-of-hand direction in controller local
-    handBackDir.transformDirection(grip.matrixWorld).normalize();
-
-    // Direction from controller to head
-    const toHead = new THREE.Vector3().subVectors(headPos, ctrlPos).normalize();
-
-    // Angle between back-of-hand direction and direction to head
-    const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(handBackDir.dot(toHead), -1, 1)));
-    vrWatchDebug.angle = angle;
-    vrWatchDebug.thresh = vrWatch.visible ? WATCH_DEACTIVATE_ANGLE : WATCH_ACTIVATE_ANGLE;
-
-    const threshold = vrWatch.visible ? WATCH_DEACTIVATE_ANGLE : WATCH_ACTIVATE_ANGLE;
-
-    if (angle < threshold){
-      // Pose is active
-      if (!vrWatch.visible){
-        vrWatch.activateTimer += 16.67; // approximate frame time
-        if (vrWatch.activateTimer >= WATCH_ACTIVATE_MS){
-          showVRWatch(grip, ctrlPos);
-        }
-      } else {
-        // Update menu position to follow wrist
-        positionVRWatch(grip);
+    if (angle < WATCH_ACTIVATE_ANGLE){
+      vrWatch.activateTimer += 16.67; // approximate frame time
+      if (vrWatch.activateTimer >= WATCH_ACTIVATE_MS){
+        vrWatch.wearGrip = grip;
+        showVRWatch(grip, ctrlPos);
       }
       return; // only one wrist at a time
     }
   }
 
-  // No controller in watch pose
-  if (vrWatch.visible){
-    hideVRWatch();
-  }
   vrWatch.activateTimer = 0;
 }
 
@@ -2699,6 +2707,7 @@ function hideVRWatch(){
   vrWatch.visible = false;
   vrWatch.group.visible = false;
   vrWatch.activateTimer = 0;
+  vrWatch.wearGrip = null;
 }
 const xrLatch = { snap:0, modeBtn:false, resetBtn:false, crouchBtn:false,
   editBtn:false, aDown:0, xDown:0, stickFwdTele:false, dbgBtn:false };
