@@ -2026,7 +2026,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.2';
+const BUILD_VERSION = 'build 2026-07-13.3';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2595,7 +2595,7 @@ function updateVRWatchSlider(pct){
 }
 
 // Check if either controller is in "look at watch" pose
-const WATCH_ACTIVATE_ANGLE = 100;   // degrees: palm-up must face within this of head direction
+const WATCH_ACTIVATE_ANGLE = 100;   // degrees: back of hand must face within this of head direction
 const WATCH_DEACTIVATE_ANGLE = 120; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
 const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
 const WATCH_ACTIVATE_MS = 350;     // dwell time to open
@@ -2622,20 +2622,22 @@ function checkWatchPose(){
     vrWatchDebug.dist = dist;   // diagnostic - kept even if too far to compute an angle below
     if (dist > WATCH_ACTIVATE_DIST) continue;
 
-    // Get controller's "up" direction (palm facing direction when holding controller)
-    // On Quest Touch controllers, local Y-up points away from the palm (toward the back of the hand)
-    // So the palm faces -Y local. We want to detect when the palm faces toward the head.
-    // NOTE: this axis assumption is unverified on real hardware (untestable in the dev
-    // sandbox) - if the watch menu never triggers even at a close, palm-up pose, this is
-    // the first thing to suspect; try (0,1,0) or a different local axis instead of (0,-1,0).
-    const palmDir = new THREE.Vector3(0, -1, 0); // palm direction in controller local
-    palmDir.transformDirection(grip.matrixWorld).normalize();
+    // The watch menu should appear when you look at the BACK of your hand
+    // (like checking a real wrist watch), not when your palm faces you.
+    // On Quest Touch controllers, local Y-up points away from the palm,
+    // toward the back of the hand - so we want +Y local facing the head.
+    // NOTE: this axis assumption is unverified on real hardware (untestable
+    // in the dev sandbox) - if the watch menu never triggers even with the
+    // back of your hand held close and facing your face, this is the first
+    // thing to suspect; try (0,-1,0) or a different local axis instead.
+    const handBackDir = new THREE.Vector3(0, 1, 0); // back-of-hand direction in controller local
+    handBackDir.transformDirection(grip.matrixWorld).normalize();
 
     // Direction from controller to head
     const toHead = new THREE.Vector3().subVectors(headPos, ctrlPos).normalize();
 
-    // Angle between palm direction and direction to head
-    const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(palmDir.dot(toHead), -1, 1)));
+    // Angle between back-of-hand direction and direction to head
+    const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(handBackDir.dot(toHead), -1, 1)));
     vrWatchDebug.angle = angle;
     vrWatchDebug.thresh = vrWatch.visible ? WATCH_DEACTIVATE_ANGLE : WATCH_ACTIVATE_ANGLE;
 
