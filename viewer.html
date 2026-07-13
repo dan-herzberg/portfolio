@@ -190,9 +190,10 @@ Jump             double-tap: toggle fly
 
 QUEST 2
 Left stick       move
-Right stick      snap turn
-Right stick fwd  walk: hold=aim teleport, release=go
-                 fly: altitude up/down
+Right stick      smooth turn
+Right stick fwd  holding a part: push/pull it
+                 else walk: hold=aim teleport, release=go
+                 else fly: altitude up/down
 Trigger          interact
 Grip             grab / release
 A                jump (double-tap: toggle fly)
@@ -2052,7 +2053,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.11';
+const BUILD_VERSION = 'build 2026-07-13.12';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2248,6 +2249,10 @@ for (let i=0;i<2;i++){
 }
 function leftGrip(){
   const c = controllers.find(cc => cc.userData.handedness === 'left');
+  return c ? c.userData.grip : null;
+}
+function rightGrip(){
+  const c = controllers.find(cc => cc.userData.handedness === 'right');
   return c ? c.userData.grip : null;
 }
 /* ============================== in-VR debug HUD ============================== */
@@ -2723,9 +2728,12 @@ function updateVRWatchPoke(wearGrip){
   }
   vrWatch.pokeActive = hit;
 }
-const xrLatch = { snap:0, jumpBtn:false, resetBtn:false, crouchBtn:false,
+const xrLatch = { jumpBtn:false, resetBtn:false, crouchBtn:false,
   editBtn:false, xDown:0, dbgBtn:false, teleBtn:false };
 const XR_HOLD_MS = 500;  // hold threshold for X=resetAll
+const TURN_RATE = 2.2;      // rad/s at full stick deflection (smooth turn)
+const TURN_DEADZONE = 0.15; // ignore small stick noise near center
+const PUSH_PULL_SPEED = 2.5; // m/s at full stick deflection, pushing/pulling a held part
 function pollXRInput(dt){
   const session = renderer.xr.getSession();
   if (!session) return { mx:0, mz:0, my:0 };
@@ -2775,11 +2783,10 @@ function pollXRInput(dt){
       xrLatch.editBtn = !!y?.pressed;
 
     } else if (src.handedness === 'right'){
+      // Smooth turn: continuous rotation rate proportional to stick
+      // deflection, rather than fixed-angle snap-turns.
       const sx = gp.axes[2] || 0;
-      if (Math.abs(sx) > 0.6 && xrLatch.snap === 0){
-        xrLatch.snap = Math.sign(sx);
-        snapTurn(-Math.sign(sx) * Math.PI/6);
-      } else if (Math.abs(sx) < 0.3) xrLatch.snap = 0;
+      if (Math.abs(sx) > TURN_DEADZONE) turnBy(-sx * TURN_RATE * dt);
 
       // A button: jump (double-tap toggles fly), same trigger as desktop
       // Space / the mobile Jump button
@@ -2792,7 +2799,19 @@ function pollXRInput(dt){
       if (b?.pressed && !xrLatch.crouchBtn) st.crouching = !st.crouching;
       xrLatch.crouchBtn = !!b?.pressed;
 
-      if (flying){
+      const rgrip = rightGrip();
+      const heldRec = rgrip ? held.get(rgrip) : null;
+      if (heldRec){
+        // Right stick forward/back pushes/pulls whatever the right hand is
+        // holding, same as the desktop mouse wheel - takes priority over
+        // teleport-arm/altitude below since a full hand is the more
+        // immediate use of the stick.
+        const sy = gp.axes[3] || 0;
+        if (Math.abs(sy) > TURN_DEADZONE){
+          heldRec.node.position.z = THREE.MathUtils.clamp(
+            heldRec.node.position.z + sy * PUSH_PULL_SPEED * dt, -6, -0.35);
+        }
+      } else if (flying){
         // While flying, the right stick's forward/back axis controls
         // altitude directly instead of arming teleport - teleporting
         // doesn't make much sense when you already have free 3D movement.
@@ -2817,7 +2836,11 @@ function pollXRInput(dt){
   }
   return { mx, mz, my };
 }
-function snapTurn(angle){
+// Rotate the player around the camera's (head's) world position, not the
+// player rig's own origin, so turning doesn't swing your view around some
+// arbitrary point behind you. Used both for smooth continuous turning and
+// (previously) fixed-angle snap turns - the math is the same either way.
+function turnBy(angle){
   camera.getWorldPosition(tmpV);
   const px = player.position.x - tmpV.x, pz = player.position.z - tmpV.z;
   const s = Math.sin(angle), c = Math.cos(angle);
