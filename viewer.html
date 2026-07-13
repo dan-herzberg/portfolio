@@ -278,14 +278,16 @@ Edit mode + AI run on flat screens only.
   </div>
 </div>
 
-<!-- accept lists both extensions AND MIME types: Android/Quest's system file
-     picker (Storage Access Framework) filters by MIME type, and .glb has no
-     registered MIME association on stock Android - an extension-only accept
-     can make cloud-backed providers (Drive, etc.) in the picker show an
-     empty folder even when the file is right there. readFile() below
-     validates by filename anyway, so widening this can't let anything
-     invalid through. -->
-<input type="file" id="file" accept=".glb,.gltf,.json,model/gltf-binary,model/gltf+json,application/json,application/octet-stream" hidden>
+<!-- No accept filter, deliberately: any specific type/extension list here
+     (even a broad one mixing extensions and MIME types) makes Android's
+     file input fall back to a restricted "Recent files" bottom-sheet with
+     no way to browse folders or other storage providers (Drive, etc.) -
+     confirmed on the Quest browser, where that sheet has no "browse
+     files"/navigation option at all, unlike stock Android Chrome. accept
+     omitted entirely (equivalent to accept="*/*") makes Android hand off
+     to the full Files/Storage-Access-Framework document browser instead.
+     readFile() below validates by filename regardless of what's picked. -->
+<input type="file" id="file" hidden>
 <input type="file" id="ovfile" accept=".json" hidden>
 
 <script type="importmap">
@@ -2053,7 +2055,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.12';
+const BUILD_VERSION = 'build 2026-07-13.13';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
