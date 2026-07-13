@@ -191,7 +191,8 @@ Jump             double-tap: toggle fly
 QUEST 2
 Left stick       move
 Right stick      snap turn
-Right stick fwd  hold: aim teleport, release: go
+Right stick fwd  walk: hold=aim teleport, release=go
+                 fly: altitude up/down
 Trigger          interact
 Grip             grab / release
 A                jump (double-tap: toggle fly)
@@ -494,6 +495,11 @@ function setFlying(on){
   flying = on;
   document.getElementById('vslide').style.display = (isTouch && flying) ? 'flex' : 'none';
   if (flying) st.velY = 0;
+  // the right stick's forward/back axis switches jobs when flying starts
+  // (altitude instead of arming teleport) - drop any in-progress arm/press
+  // state so it can't get stuck armed from the moment before the toggle
+  vrTeleport.armed = false;
+  xrLatch.teleBtn = false;
   toast(flying ? 'Fly mode on' : 'Fly mode off');
 }
 // Jump is double-purpose: a normal tap jumps (if grounded and not already
@@ -2039,7 +2045,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.8';
+const BUILD_VERSION = 'build 2026-07-13.9';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2798,8 +2804,8 @@ const xrLatch = { snap:0, jumpBtn:false, resetBtn:false, crouchBtn:false,
 const XR_HOLD_MS = 500;  // hold threshold for X=resetAll
 function pollXRInput(dt){
   const session = renderer.xr.getSession();
-  if (!session) return { mx:0, mz:0 };
-  let mx=0, mz=0;
+  if (!session) return { mx:0, mz:0, my:0 };
+  let mx=0, mz=0, my=0;
   const now = performance.now();
   for (const src of session.inputSources){
     const gp = src.gamepad;
@@ -2862,22 +2868,30 @@ function pollXRInput(dt){
       if (b?.pressed && !xrLatch.crouchBtn) st.crouching = !st.crouching;
       xrLatch.crouchBtn = !!b?.pressed;
 
-      // Right stick forward: hold to arm the teleport preview (arc target +
-      // line, drawn in updateVRTeleportPreview), release to teleport to
-      // wherever it landed. Always available alongside walking rather than
-      // a mode you have to switch into - the classic VR comfort-locomotion
-      // pattern (point, preview, release) used to cut motion sickness.
-      const fwd = (gp.axes[3] || 0) < -0.7;
-      if (fwd && !xrLatch.teleBtn){
-        vrTeleport.armed = true;
-      } else if (!fwd && xrLatch.teleBtn){
-        vrTeleport.armed = false;
-        if (vrTeleport.valid) teleportTo(vrTeleport.point);
+      if (flying){
+        // While flying, the right stick's forward/back axis controls
+        // altitude directly instead of arming teleport - teleporting
+        // doesn't make much sense when you already have free 3D movement.
+        my = -(gp.axes[3] || 0);
+      } else {
+        // Right stick forward: hold to arm the teleport preview (arc target
+        // + line, drawn in updateVRTeleportPreview), release to teleport to
+        // wherever it landed. Always available alongside walking rather
+        // than a mode you have to switch into - the classic VR
+        // comfort-locomotion pattern (point, preview, release) used to cut
+        // motion sickness.
+        const fwd = (gp.axes[3] || 0) < -0.7;
+        if (fwd && !xrLatch.teleBtn){
+          vrTeleport.armed = true;
+        } else if (!fwd && xrLatch.teleBtn){
+          vrTeleport.armed = false;
+          if (vrTeleport.valid) teleportTo(vrTeleport.point);
+        }
+        xrLatch.teleBtn = fwd;
       }
-      xrLatch.teleBtn = fwd;
     }
   }
-  return { mx, mz };
+  return { mx, mz, my };
 }
 function snapTurn(angle){
   camera.getWorldPosition(tmpV);
@@ -2950,8 +2964,8 @@ function updateMovement(dt){
   // handleJumpPress()), not polled here, so a single tap can't double-fire
   ix += joy.x; iz += joy.y;
 
-  let xr = { mx:0, mz:0 };
-  if (inXR){ xr = pollXRInput(dt); ix += xr.mx; iz += xr.mz; }
+  let xr = { mx:0, mz:0, my:0 };
+  if (inXR){ xr = pollXRInput(dt); ix += xr.mx; iz += xr.mz; if (flying) iy += xr.my; }
 
   const L = Math.hypot(ix, iz);
   if (L > 1){ ix/=L; iz/=L; }
