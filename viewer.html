@@ -2026,7 +2026,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.6';
+const BUILD_VERSION = 'build 2026-07-13.7';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2214,7 +2214,17 @@ for (let i=0;i<2;i++){
   c.addEventListener('selectstart', ()=>onVRTrigger(c));
   c.addEventListener('squeezestart', ()=>grabWith(grip, rayFrom(c)));
   c.addEventListener('squeezeend', ()=>releaseHeld(grip));
+  // three.js fires 'connected' with the XRInputSource once a physical
+  // controller attaches to this index, which is the reliable way to know
+  // which of controllers[0]/[1] is the left hand (index order isn't
+  // guaranteed to match handedness).
+  c.addEventListener('connected', e => { c.userData.handedness = e.data.handedness; });
+  c.addEventListener('disconnected', () => { c.userData.handedness = null; });
   controllers.push(c);
+}
+function leftGrip(){
+  const c = controllers.find(cc => cc.userData.handedness === 'left');
+  return c ? c.userData.grip : null;
 }
 /* ============================== in-VR debug HUD ============================== */
 // DOM toasts and console are invisible in a headset, so surface state on a
@@ -2238,7 +2248,7 @@ let vrLastError = '';
 // Live numbers for the two gesture-triggered menus, since neither shows any
 // visible feedback in-headset when its trigger condition just isn't met -
 // without these the debug HUD could only ever say "false", not why.
-let vrWatchDebug = { dist: null, angle: null, thresh: null };
+let vrWatchDebug = { dist: null, angle: null, thresh: null, roll: null };
 let vrEditDebug = { yPresses: 0, lastAttempt: 'none yet' };
 function drawVRDebug(){
   if (!vrDebugOn || !renderer.xr.isPresenting){ vrDebug.mesh.visible = false; return; }
@@ -2259,7 +2269,8 @@ function drawVRDebug(){
   put('watch: ' + vrWatch.visible + '  edit: ' + vrMenu.visible);
   const wd = vrWatchDebug;
   put('pose: dist=' + (wd.dist?.toFixed(2) ?? '-') + 'm  angle=' +
-    (wd.angle?.toFixed(0) ?? '-') + '/' + (wd.thresh ?? '-'));
+    (wd.angle?.toFixed(0) ?? '-') + '/' + (wd.thresh ?? '-') +
+    '  roll=' + (wd.roll?.toFixed(0) ?? '-') + '/' + WATCH_ROLL_ANGLE);
   put('Y presses: ' + vrEditDebug.yPresses + '  last: ' + vrEditDebug.lastAttempt.slice(0,28));
   put('mode: ' + mode + '  crouch: ' + st.crouching);
   if (vrLastError){ ctx.fillStyle = '#e05252'; put('ERR: ' + vrLastError.slice(0,36)); }
@@ -2595,22 +2606,29 @@ function updateVRWatchSlider(pct){
   document.getElementById('simplifyPct').textContent = (notch * 3) + '%';
 }
 
-// Check if either controller is in "look at watch" pose
-const WATCH_ACTIVATE_ANGLE = 110;   // degrees: back of hand must face within this of head direction
+// Check if the LEFT controller is in "look at watch" pose. Right-handed-
+// only by design (task: "accessible from the left hand only") - a real
+// watch always sits on one wrist, and fixing it to the left hand also
+// leaves the right hand permanently free to poke buttons on it.
+const WATCH_ACTIVATE_ANGLE = 110;   // degrees: back of hand must face within this of head direction (pitch+yaw of the facing axis)
 const WATCH_DEACTIVATE_ANGLE = 130; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
+const WATCH_ROLL_ANGLE = 90;        // degrees: how far the wrist may be rolled and still count - see watchPoseAngle()
 const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
 const WATCH_ACTIVATE_MS = 350;     // dwell time to open
 const WATCH_DEACTIVATE_MS = 250;   // dwell time before closing - absorbs a single bad tracking frame so a stray glitch (or the other hand momentarily nearing the face to poke a button) doesn't snap the menu shut and let the other controller race in to reopen it
 const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // world-up offset + horizontal nudge toward the headset, in meters
 
-// Angle between a grip's back-of-hand direction and the direction from that
-// grip to the head. See the axis note on WATCH_ACTIVATE_ANGLE's callers below.
+// Full pose test for "looking at your wrist watch": distance from the head,
+// PLUS the facing angle (pitch+yaw combined - where the back-of-hand normal
+// points relative to the head), PLUS roll (how the hand is rotated around
+// that normal). The facing-angle test alone can't see roll: it's satisfied
+// just as well by a hand rolled 90 deg sideways as by one held naturally
+// upright, so without it the gesture would fire even with the wrist not
+// actually raised the way you'd raise it to read a watch.
 function watchPoseAngle(grip, headPos){
   grip.updateMatrixWorld(true);
   const ctrlPos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
   const dist = ctrlPos.distanceTo(headPos);
-  // The watch menu should appear when you look at the BACK of your hand
-  // (like checking a real wrist watch), not when your palm faces you.
   // On Quest Touch controllers, local Y-up points away from the palm,
   // toward the back of the hand - so we want +Y local facing the head.
   // NOTE: this axis assumption is unverified on real hardware (untestable
@@ -2621,7 +2639,15 @@ function watchPoseAngle(grip, headPos){
   handBackDir.transformDirection(grip.matrixWorld).normalize();
   const toHead = new THREE.Vector3().subVectors(headPos, ctrlPos).normalize();
   const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(handBackDir.dot(toHead), -1, 1)));
-  return { ctrlPos, dist, angle };
+  // Roll: the controller's forward/pointing axis (WebXR's standardized
+  // local -Z, the same axis the laser/aim ray uses) should point roughly
+  // upward when the wrist is genuinely raised to look at it, rather than
+  // sideways or down - this is unverified on real hardware for the same
+  // reason as the facing axis above; try (0,0,1) if it never triggers.
+  const pointDir = new THREE.Vector3(0, 0, -1);
+  pointDir.transformDirection(grip.matrixWorld).normalize();
+  const roll = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(pointDir.dot(UP), -1, 1)));
+  return { ctrlPos, dist, angle, roll };
 }
 
 function checkWatchPose(){
@@ -2632,18 +2658,19 @@ function checkWatchPose(){
   camera.getWorldPosition(tmpV); // head position
   const headPos = tmpV.clone();
 
-  // Once open, only track the wrist that opened it - re-scanning both
-  // controllers every frame let the OTHER hand (reaching in near the face
-  // to press a button) occasionally out-compete the actual wrist for the
-  // pose check, causing the menu to jump or snap shut mid-interaction. This
-  // also fully frees the other controller's ray for button interaction.
+  // Once open, only track the wrist that opened it - re-scanning every
+  // frame let the other hand (reaching in near the face to press a button)
+  // occasionally out-compete the actual wrist for the pose check, causing
+  // the menu to jump or snap shut mid-interaction. This also fully frees
+  // the right controller's ray/poke for button interaction.
   if (vrWatch.visible){
     const grip = vrWatch.wearGrip;
-    const { dist, angle } = watchPoseAngle(grip, headPos);
+    const { dist, angle, roll } = watchPoseAngle(grip, headPos);
     vrWatchDebug.dist = dist;
     vrWatchDebug.angle = angle;
     vrWatchDebug.thresh = WATCH_DEACTIVATE_ANGLE;
-    if (dist <= WATCH_ACTIVATE_DIST && angle < WATCH_DEACTIVATE_ANGLE){
+    vrWatchDebug.roll = roll;
+    if (dist <= WATCH_ACTIVATE_DIST && angle < WATCH_DEACTIVATE_ANGLE && roll < WATCH_ROLL_ANGLE){
       vrWatch.deactivateTimer = 0;
       positionVRWatch(grip);
       updateVRWatchPoke(grip);
@@ -2654,27 +2681,24 @@ function checkWatchPose(){
     return;
   }
 
-  for (const c of controllers){
-    const grip = c.userData.grip;
-    if (!grip) continue;
+  const grip = leftGrip();
+  if (!grip){ vrWatch.activateTimer = 0; return; }
 
-    const { ctrlPos, dist, angle } = watchPoseAngle(grip, headPos);
-    vrWatchDebug.dist = dist;   // diagnostic - kept even if too far to compute a meaningful angle
-    vrWatchDebug.angle = angle;
-    vrWatchDebug.thresh = WATCH_ACTIVATE_ANGLE;
-    if (dist > WATCH_ACTIVATE_DIST) continue;
+  const { ctrlPos, dist, angle, roll } = watchPoseAngle(grip, headPos);
+  vrWatchDebug.dist = dist;   // diagnostic - kept even if too far to compute a meaningful angle
+  vrWatchDebug.angle = angle;
+  vrWatchDebug.thresh = WATCH_ACTIVATE_ANGLE;
+  vrWatchDebug.roll = roll;
 
-    if (angle < WATCH_ACTIVATE_ANGLE){
-      vrWatch.activateTimer += 16.67; // approximate frame time
-      if (vrWatch.activateTimer >= WATCH_ACTIVATE_MS){
-        vrWatch.wearGrip = grip;
-        showVRWatch(grip, ctrlPos);
-      }
-      return; // only one wrist at a time
+  if (dist <= WATCH_ACTIVATE_DIST && angle < WATCH_ACTIVATE_ANGLE && roll < WATCH_ROLL_ANGLE){
+    vrWatch.activateTimer += 16.67; // approximate frame time
+    if (vrWatch.activateTimer >= WATCH_ACTIVATE_MS){
+      vrWatch.wearGrip = grip;
+      showVRWatch(grip, ctrlPos);
     }
+  } else {
+    vrWatch.activateTimer = 0;
   }
-
-  vrWatch.activateTimer = 0;
 }
 
 function positionVRWatch(grip){
@@ -2959,12 +2983,14 @@ function updateMovement(dt){
     st.velY -= 9.8*dt;
     player.position.y += st.velY*dt;
     if (player.position.y <= restY + 0.02 && st.velY <= 0){
-      // step limit: refuse pop-ups taller than 0.5 m - but bypass it while
+      // step limit: refuse pop-ups taller than a real stair riser (~0.3 m,
+      // generous for a curb or a tall step) - climbing onto furniture-height
+      // obstacles (a table, a pedestal) by just walking into them isn't
+      // wanted, only genuine stairs/curbs should auto-step. Bypass it while
       // crouch is active or was just released, since the "step" it would
-      // measure there is our own 0.6 m crouch offset (deeper than the
-      // 0.55 m limit), not real environment geometry
+      // measure there is our own 0.6 m crouch offset, not real geometry.
       const bypassStepLimit = crouchingXR || st.wasCrouchingXR;
-      if (bypassStepLimit || gy - (player.position.y - st.velY*dt) < 0.55){
+      if (bypassStepLimit || gy - (player.position.y - st.velY*dt) < 0.3){
         player.position.y = restY; st.velY = 0; st.grounded = true;
       } else { player.position.y = Math.max(player.position.y, 0); st.velY = 0; }
     } else st.grounded = false;
