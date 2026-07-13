@@ -2052,7 +2052,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.10';
+const BUILD_VERSION = 'build 2026-07-13.11';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2269,10 +2269,9 @@ camera.add(vrDebug.mesh);
 vrDebug.mesh.visible = false;
 let vrFrameCount = 0;
 let vrLastError = '';
-// Live numbers for the two gesture-triggered menus, since neither shows any
-// visible feedback in-headset when its trigger condition just isn't met -
-// without these the debug HUD could only ever say "false", not why.
-let vrWatchDebug = { dist: null, angle: null, thresh: null, roll: null };
+// Live numbers for the Y-button edit menu, since it shows no visible
+// feedback in-headset when a press doesn't find anything to edit - without
+// this the debug HUD could only ever say "false", not why.
 let vrEditDebug = { yPresses: 0, lastAttempt: 'none yet' };
 function drawVRDebug(){
   if (!vrDebugOn || !renderer.xr.isPresenting){ vrDebug.mesh.visible = false; return; }
@@ -2290,11 +2289,8 @@ function drawVRDebug(){
   put('frame: ' + vrFrameCount + '  presenting: ' + renderer.xr.isPresenting);
   put('controllers: ' + controllers.length + '  sources: ' + srcs.length);
   put('hands: ' + (hands || 'none'));
-  put('watch: ' + vrWatch.visible + '  edit: ' + vrMenu.visible);
-  const wd = vrWatchDebug;
-  put('pose: dist=' + (wd.dist?.toFixed(2) ?? '-') + 'm  angle=' +
-    (wd.angle?.toFixed(0) ?? '-') + '/' + (wd.thresh ?? '-') +
-    '  roll=' + (wd.roll?.toFixed(0) ?? '-') + '/' + WATCH_ROLL_ANGLE);
+  put('watch: ' + vrWatch.visible + '  edit: ' + vrMenu.visible +
+    '  leftGrip: ' + !!leftGrip());
   put('Y presses: ' + vrEditDebug.yPresses + '  last: ' + vrEditDebug.lastAttempt.slice(0,28));
   put('flying: ' + flying + '  crouch: ' + st.crouching +
     '  tele: ' + vrTeleport.armed + '/' + vrTeleport.valid);
@@ -2460,15 +2456,8 @@ function toggleVRWristMenu(){
   vrMenu.targetNode = chain[0];
   vrMenu.targetPath = pathFor(chain[0]);
 
-  // Position menu in front of left controller, facing the user
-  const lc = controllers[0] || controllers[1];
-  lc.updateMatrixWorld(true);
-  vrMenu.group.position.setFromMatrixPosition(lc.matrixWorld);
-  vrMenu.group.position.y += 0.15;
-  // Face the camera
-  camera.getWorldPosition(tmpV);
-  vrMenu.group.lookAt(tmpV);
-
+  // Position/orientation is handled every frame by updateWristMenus() -
+  // it takes over the same left-wrist-locked slot the watch panel uses
   vrMenu.group.visible = true;
   vrMenu.visible = true;
   updateVRMenuHighlights();
@@ -2486,7 +2475,7 @@ function hideVRWristMenu(){
 
 /* ============================== VR watch menu (gaze-activated) ============================== */
 const vrWatch = { group: new THREE.Group(), visible: false, buttons: [], sliderParts: null,
-  activateTimer: 0, deactivateTimer: 0, wearGrip: null, pokeActive: null };
+  pokeActive: null, statsTimer: 0 };
 vrWatch.group.visible = false;
 scene.add(vrWatch.group);
 
@@ -2631,140 +2620,68 @@ function updateVRWatchSlider(pct){
   document.getElementById('simplifyPct').textContent = (notch * 3) + '%';
 }
 
-// Check if the LEFT controller is in "look at watch" pose. Right-handed-
-// only by design (task: "accessible from the left hand only") - a real
-// watch always sits on one wrist, and fixing it to the left hand also
-// leaves the right hand permanently free to poke buttons on it.
-const WATCH_ACTIVATE_ANGLE = 110;   // degrees: back of hand must face within this of head direction (pitch+yaw of the facing axis)
-const WATCH_DEACTIVATE_ANGLE = 130; // hysteresis: wider angle to close - must stay above ACTIVATE_ANGLE or the menu flickers shut the instant it opens
-const WATCH_ROLL_ANGLE = 90;        // degrees: how far the wrist may be rolled and still count - see watchPoseAngle()
-const WATCH_ACTIVATE_DIST = 0.5;   // meters: controller must be within this of head
-const WATCH_ACTIVATE_MS = 350;     // dwell time to open
-const WATCH_DEACTIVATE_MS = 250;   // dwell time before closing - absorbs a single bad tracking frame so a stray glitch (or the other hand momentarily nearing the face to poke a button) doesn't snap the menu shut and let the other controller race in to reopen it
-const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // world-up offset + horizontal nudge toward the headset, in meters
+// The wrist menu is rigidly attached to the LEFT controller at all times
+// while presenting (no gesture, no dwell timer, no hide) - a real watch
+// doesn't need you to angle your wrist "just right" before it's readable.
+// Fixing it to the left hand permanently frees the right hand to poke its
+// buttons. The edit menu (Y button) takes over this same locked slot while
+// it's open; see updateWristMenus() below.
+const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // local offset from the grip origin (grip's own axes), in meters
 
-// Full pose test for "looking at your wrist watch": distance from the head,
-// PLUS the facing angle (pitch+yaw combined - where the back-of-hand normal
-// points relative to the head), PLUS roll (how the hand is rotated around
-// that normal). The facing-angle test alone can't see roll: it's satisfied
-// just as well by a hand rolled 90 deg sideways as by one held naturally
-// upright, so without it the gesture would fire even with the wrist not
-// actually raised the way you'd raise it to read a watch.
-function watchPoseAngle(grip, headPos){
-  grip.updateMatrixWorld(true);
-  const ctrlPos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
-  const dist = ctrlPos.distanceTo(headPos);
-  // On Quest Touch controllers, local Y-up points away from the palm,
-  // toward the back of the hand - so we want +Y local facing the head.
-  // NOTE: this axis assumption is unverified on real hardware (untestable
-  // in the dev sandbox) - if the watch menu never triggers even with the
-  // back of your hand held close and facing your face, this is the first
-  // thing to suspect; try (0,-1,0) or a different local axis instead.
-  const handBackDir = new THREE.Vector3(0, 1, 0);
-  handBackDir.transformDirection(grip.matrixWorld).normalize();
-  const toHead = new THREE.Vector3().subVectors(headPos, ctrlPos).normalize();
-  const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(handBackDir.dot(toHead), -1, 1)));
-  // Roll: the controller's forward/pointing axis (WebXR's standardized
-  // local -Z, the same axis the laser/aim ray uses) should point roughly
-  // upward when the wrist is genuinely raised to look at it, rather than
-  // sideways or down - this is unverified on real hardware for the same
-  // reason as the facing axis above; try (0,0,1) if it never triggers.
-  const pointDir = new THREE.Vector3(0, 0, -1);
-  pointDir.transformDirection(grip.matrixWorld).normalize();
-  const roll = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(pointDir.dot(UP), -1, 1)));
-  return { ctrlPos, dist, angle, roll };
-}
-
-function checkWatchPose(){
-  if (!renderer.xr.isPresenting) return;
-  const session = renderer.xr.getSession();
-  if (!session) return;
-
-  camera.getWorldPosition(tmpV); // head position
-  const headPos = tmpV.clone();
-
-  // Once open, only track the wrist that opened it - re-scanning every
-  // frame let the other hand (reaching in near the face to press a button)
-  // occasionally out-compete the actual wrist for the pose check, causing
-  // the menu to jump or snap shut mid-interaction. This also fully frees
-  // the right controller's ray/poke for button interaction.
-  if (vrWatch.visible){
-    const grip = vrWatch.wearGrip;
-    const { dist, angle, roll } = watchPoseAngle(grip, headPos);
-    vrWatchDebug.dist = dist;
-    vrWatchDebug.angle = angle;
-    vrWatchDebug.thresh = WATCH_DEACTIVATE_ANGLE;
-    vrWatchDebug.roll = roll;
-    if (dist <= WATCH_ACTIVATE_DIST && angle < WATCH_DEACTIVATE_ANGLE && roll < WATCH_ROLL_ANGLE){
-      vrWatch.deactivateTimer = 0;
-      positionVRWatch(grip);
-      updateVRWatchPoke(grip);
-    } else {
-      vrWatch.deactivateTimer += 16.67;
-      if (vrWatch.deactivateTimer >= WATCH_DEACTIVATE_MS) hideVRWatch();
-    }
-    return;
-  }
-
-  const grip = leftGrip();
-  if (!grip){ vrWatch.activateTimer = 0; return; }
-
-  const { ctrlPos, dist, angle, roll } = watchPoseAngle(grip, headPos);
-  vrWatchDebug.dist = dist;   // diagnostic - kept even if too far to compute a meaningful angle
-  vrWatchDebug.angle = angle;
-  vrWatchDebug.thresh = WATCH_ACTIVATE_ANGLE;
-  vrWatchDebug.roll = roll;
-
-  if (dist <= WATCH_ACTIVATE_DIST && angle < WATCH_ACTIVATE_ANGLE && roll < WATCH_ROLL_ANGLE){
-    vrWatch.activateTimer += 16.67; // approximate frame time
-    if (vrWatch.activateTimer >= WATCH_ACTIVATE_MS){
-      vrWatch.wearGrip = grip;
-      showVRWatch(grip, ctrlPos);
-    }
-  } else {
-    vrWatch.activateTimer = 0;
-  }
-}
-
-function positionVRWatch(grip){
+// Rigidly match a group's position AND orientation to a grip, every frame -
+// not a one-time snapshot and not a camera-facing billboard, so it visually
+// reads as "worn" on the wrist rather than floating near it.
+function positionOnWrist(group, grip){
   grip.updateMatrixWorld(true);
   const pos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
-  camera.getWorldPosition(tmpV);
-  // Offset in world space, not grip-local: the watch-check gesture itself
-  // rotates the wrist so the grip's own local "up" axis no longer points
-  // up in any useful sense (it can end up sideways or pointing back down),
-  // which is why a transformDirection()-based offset didn't visually sit
-  // above the controller. True world-up plus a horizontal nudge toward the
-  // headset reliably clears the controller model instead.
-  const towardHead = new THREE.Vector3().subVectors(tmpV, pos);
-  towardHead.y = 0;
-  if (towardHead.lengthSq() > 1e-6) towardHead.normalize(); else towardHead.set(0, 0, 1);
-  pos.y += WATCH_OFFSET.y;
-  pos.addScaledVector(towardHead, WATCH_OFFSET.z);
-  vrWatch.group.position.copy(pos);
-  // Face the camera
-  vrWatch.group.lookAt(tmpV);
+  const quat = new THREE.Quaternion().setFromRotationMatrix(grip.matrixWorld);
+  // WATCH_OFFSET is in the grip's own local axes (not world space), so it
+  // rides along rigidly as the wrist rotates instead of drifting off to the
+  // side. NOTE: exact axis feel (how far "above" the controller model this
+  // reads as) is unverified on real hardware - tune WATCH_OFFSET's
+  // components directly if it clips into the controller or floats too far.
+  pos.add(WATCH_OFFSET.clone().applyQuaternion(quat));
+  group.position.copy(pos);
+  group.quaternion.copy(quat);
 }
 
-function showVRWatch(grip, pos){
-  vrWatch.visible = true;
-  vrWatch.group.visible = true;
-  vrWatch.deactivateTimer = 0;
-  vrWatch.pokeActive = null;
-  positionVRWatch(grip);
-  updateVRWatchStats();
-  // Sync slider position
-  const notch = parseInt(document.getElementById('simplifySlider').value, 10);
-  updateVRWatchSlider(notch / 10);
-}
-
-function hideVRWatch(){
-  vrWatch.visible = false;
-  vrWatch.group.visible = false;
-  vrWatch.activateTimer = 0;
-  vrWatch.deactivateTimer = 0;
-  vrWatch.wearGrip = null;
-  vrWatch.pokeActive = null;
+// Runs every frame while presenting: keeps whichever panel is currently
+// active (edit menu if open, else the watch) locked to the left grip. The
+// edit menu fully takes over the wrist slot - the watch panel is hidden,
+// not stacked underneath it - and only goes away when Y is pressed again
+// (toggleVRWristMenu/hideVRWristMenu), never automatically.
+function updateWristMenus(){
+  if (!renderer.xr.isPresenting){
+    vrWatch.visible = false; vrWatch.group.visible = false;
+    vrMenu.group.visible = false;
+    return;
+  }
+  const grip = leftGrip();
+  if (!grip){
+    vrWatch.visible = false; vrWatch.group.visible = false;
+    vrMenu.group.visible = false;
+    return;
+  }
+  if (vrMenu.visible){
+    positionOnWrist(vrMenu.group, grip);
+    vrMenu.group.visible = true;
+    vrWatch.visible = false;
+    vrWatch.group.visible = false;
+  } else {
+    positionOnWrist(vrWatch.group, grip);
+    vrWatch.group.visible = true;
+    vrWatch.visible = true;
+    updateVRWatchPoke(grip);
+    // stats/slider reflect live scene state now that there's no "just
+    // opened" moment to hook a one-time refresh to
+    vrWatch.statsTimer += 16.67;
+    if (vrWatch.statsTimer >= 400){
+      vrWatch.statsTimer = 0;
+      updateVRWatchStats();
+      const notch = parseInt(document.getElementById('simplifySlider').value, 10);
+      updateVRWatchSlider(notch / 10);
+    }
+  }
 }
 
 // Poke-based interaction: the OTHER hand's controller physically touching a
@@ -3362,8 +3279,8 @@ renderer.setAnimationLoop(() => {
     // depth-cue line from each carried part down to the ground
     updateDepthLines();
 
-    // VR watch menu: check wrist pose each frame
-    checkWatchPose();
+    // VR wrist menus: keep whichever panel is active locked to the left grip
+    updateWristMenus();
   } catch (e){
     vrLastError = (e && e.message) ? e.message : String(e);
     if (!loopErrorLogged){ console.error('[loop] subsystem error (rendering continues):', e); loopErrorLogged = true; }
