@@ -2055,7 +2055,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.15';
+const BUILD_VERSION = 'build 2026-07-13.16';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2639,7 +2639,7 @@ const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // local offset from the 
 // instead of lying flat/parallel with your forearm. NOTE: sign/axis feel is
 // unverified on real hardware - flip the sign (or try the Z axis) if it
 // pitches the wrong way.
-const WATCH_PITCH = THREE.MathUtils.degToRad(100);
+const WATCH_PITCH = THREE.MathUtils.degToRad(280); // 100 + another 180
 const _watchPitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), WATCH_PITCH);
 
 // Rigidly match a group's position AND orientation to a grip, every frame -
