@@ -2055,7 +2055,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.14';
+const BUILD_VERSION = 'build 2026-07-13.15';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2813,13 +2813,30 @@ function pollXRInput(dt){
       const heldRec = rgrip ? held.get(rgrip) : null;
       if (heldRec){
         // Right stick forward/back pushes/pulls whatever the right hand is
-        // holding, same as the desktop mouse wheel - takes priority over
-        // teleport-arm/altitude below since a full hand is the more
-        // immediate use of the stick.
+        // holding - takes priority over teleport-arm/altitude below since a
+        // full hand is the more immediate use of the stick.
+        //
+        // The held part is attached to the GRIP (holder.attach() in
+        // grabWith()), so adjusting its local .z the way the desktop mouse
+        // wheel does (there, the part is attached to the camera, whose
+        // local -Z is unambiguously "forward") assumes grip-local -Z is
+        // also "away from you." It isn't - confirmed on hardware, that
+        // moved the part up/down instead. So this works in WORLD space
+        // instead: push/pull along the camera-to-part direction, which is
+        // unambiguous regardless of the grip's own axis conventions, then
+        // re-express the result relative to the grip since that's still
+        // the part's actual parent.
         const sy = gp.axes[3] || 0;
         if (Math.abs(sy) > TURN_DEADZONE){
-          heldRec.node.position.z = THREE.MathUtils.clamp(
-            heldRec.node.position.z + sy * PUSH_PULL_SPEED * dt, -6, -0.35);
+          const objPos = heldRec.node.getWorldPosition(new THREE.Vector3());
+          const headPos = camera.getWorldPosition(new THREE.Vector3());
+          const dir = objPos.clone().sub(headPos);
+          const dist = THREE.MathUtils.clamp(
+            dir.length() - sy * PUSH_PULL_SPEED * dt, 0.35, 6);
+          dir.normalize();
+          const newWorldPos = headPos.addScaledVector(dir, dist);
+          heldRec.node.parent.worldToLocal(newWorldPos);
+          heldRec.node.position.copy(newWorldPos);
         }
       } else if (flying){
         // While flying, the right stick's forward/back axis controls
