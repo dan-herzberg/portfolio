@@ -34,6 +34,11 @@
                 only works over HTTPS &mdash; which is exactly how this site is hosted, so no extra setup is needed.</p>
             <p>Load a model (or press <strong>Load Demo Room</strong> to try it immediately), then press
                 <strong>Enter VR</strong> in the top-right corner and put on your headset.</p>
+            <p><strong>Loading your own .glb on the headset:</strong> the Quest Browser's file picker only
+                shows a flat list of whatever's already sitting in Downloads &mdash; it can't browse Internal
+                Storage, an SD card, or cloud drives the way a native app can. Get your model into Downloads
+                first (open a direct download link to it in the Quest Browser, or use the Meta Quest mobile
+                app's "send to headset" feature), and it'll show up in the Load picker.</p>
         </div>
     </section>
 
@@ -42,22 +47,29 @@
         <div class="project-grid">
             <div class="project-card">
                 <h3>Move &amp; look</h3>
-                <p>Left stick moves. Right stick snap-turns your view in fixed increments.</p>
+                <p>Left stick moves. Right stick turns smoothly (continuous rotation, not a snap).</p>
             </div>
             <div class="project-card">
                 <h3>Interact</h3>
-                <p>Trigger opens doors/flips switches when aimed at one, or teleports you to the floor in
-                    Teleport mode.</p>
+                <p>Trigger opens doors/flips switches when aimed at one.</p>
             </div>
             <div class="project-card">
                 <h3>Grab</h3>
-                <p>Grip picks up a grabbable part; squeeze again (or move away and release) to let go. Dropped
+                <p>Grip picks up a grabbable part; squeeze again (or move away and release) to let go. While
+                    holding a part, the right stick forward/back pushes it away or pulls it closer. Dropped
                     parts fall and settle naturally.</p>
             </div>
             <div class="project-card">
-                <h3>Mode &amp; reset</h3>
-                <p><strong>A</strong> cycles Walk / Fly / Teleport mode. <strong>X</strong> resets the whole
-                    scene &mdash; parts, doors, switches, and your position.</p>
+                <h3>Fly &amp; teleport</h3>
+                <p>Walking is the default &mdash; there's no mode to switch. <strong>A</strong> jumps; double-tap
+                    it to toggle fly (right stick then controls altitude instead). While walking, hold the
+                    right stick forward to preview a teleport target and release to go there.</p>
+            </div>
+            <div class="project-card">
+                <h3>Wrist menu &amp; reset</h3>
+                <p>A menu is locked to your left controller at all times; poke its buttons with your right
+                    hand. <strong>X</strong> resets the whole scene &mdash; parts, doors, switches, and your
+                    position.</p>
             </div>
         </div>
     </section>
