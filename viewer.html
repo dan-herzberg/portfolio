@@ -670,16 +670,34 @@ addEventListener('drop', e=>{
   if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
 });
 function readFile(file){
-  if (/\.json$/i.test(file.name)){
-    const r = new FileReader();
-    r.onload = () => importOverrides(r.result, file.name);
-    r.readAsText(file);
-    return;
-  }
+  // Sniffs content instead of trusting file.name/extension. Meta Quest
+  // Browser has a documented bug that blocks FileReader access to files
+  // with certain extensions (.glb reported specifically) with
+  // net::ERR_ACCESS_DENIED even after the user legitimately picks one
+  // through <input type="file"> - the known workaround is renaming the
+  // file before picking it, which also defeats any filename-based
+  // dispatch here. GLTFLoader.parse() already auto-detects binary GLB vs
+  // text-JSON gltf on its own, so the only thing worth sniffing for
+  // ourselves is our own overrides JSON shape.
   const r = new FileReader();
   r.onload = () => {
-    lastSource = { kind:'glb', buffer:r.result, label:file.name };
-    loader.parse(r.result.slice(0), '',
+    const buf = r.result;
+    let overridesText = null;
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' &&
+          ('roles' in parsed || 'settings' in parsed || 'deleted' in parsed)){
+        overridesText = text;
+      }
+    } catch (e) { /* not valid UTF-8 JSON text - a binary GLB, most likely */ }
+
+    if (overridesText !== null){
+      importOverrides(overridesText, file.name);
+      return;
+    }
+    lastSource = { kind:'glb', buffer:buf, label:file.name };
+    loader.parse(buf.slice(0), '',
       g => buildWorld(g.scene, file.name),
       err => { console.error(err); toast('Parse failed: ' + (err.message||err)); });
   };
@@ -2055,7 +2073,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.17';
+const BUILD_VERSION = 'build 2026-07-13.18';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
