@@ -2055,7 +2055,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.13';
+const BUILD_VERSION = 'build 2026-07-13.14';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2634,6 +2634,13 @@ function updateVRWatchSlider(pct){
 // buttons. The edit menu (Y button) takes over this same locked slot while
 // it's open; see updateWristMenus() below.
 const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // local offset from the grip origin (grip's own axes), in meters
+// Pitches the panel's face up relative to the grip, about the grip's own
+// local X axis, so it reads like a watch face angled toward your eye
+// instead of lying flat/parallel with your forearm. NOTE: sign/axis feel is
+// unverified on real hardware - flip the sign (or try the Z axis) if it
+// pitches the wrong way.
+const WATCH_PITCH = THREE.MathUtils.degToRad(100);
+const _watchPitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), WATCH_PITCH);
 
 // Rigidly match a group's position AND orientation to a grip, every frame -
 // not a one-time snapshot and not a camera-facing billboard, so it visually
@@ -2641,7 +2648,8 @@ const WATCH_OFFSET = new THREE.Vector3(0, 0.18, 0.05); // local offset from the 
 function positionOnWrist(group, grip){
   grip.updateMatrixWorld(true);
   const pos = new THREE.Vector3().setFromMatrixPosition(grip.matrixWorld);
-  const quat = new THREE.Quaternion().setFromRotationMatrix(grip.matrixWorld);
+  const gripQuat = new THREE.Quaternion().setFromRotationMatrix(grip.matrixWorld);
+  const quat = gripQuat.multiply(_watchPitchQuat);
   // WATCH_OFFSET is in the grip's own local axes (not world space), so it
   // rides along rigidly as the wrist rotates instead of drifting off to the
   // side. NOTE: exact axis feel (how far "above" the controller model this
