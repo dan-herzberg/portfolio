@@ -2055,7 +2055,7 @@ let isTouch = hasFinePointer ? false
 
 if (isTouch) document.getElementById('mobile').style.display = 'block';
 document.getElementById('reticle').style.display = 'block';
-const BUILD_VERSION = 'build 2026-07-13.16';
+const BUILD_VERSION = 'build 2026-07-13.17';
 document.getElementById('buildVer').textContent = BUILD_VERSION;
 console.log('[input] initial isTouch:', isTouch, '| hasFinePointer:', hasFinePointer,
   '| uaMobile:', uaMobile, '| coarse:', primaryPointerCoarse,
@@ -2343,6 +2343,18 @@ function onVRTrigger(c){
   tryInteract(rayFrom(c), tmpV3.clone());
 }
 
+// Text canvases in both wrist menus are drawn at VR_TEXT_SS times their
+// displayed CSS-pixel size (world-space plane dimensions stay the same) -
+// the panels sit close to the eye at a small physical scale, and the
+// original 1x resolution read as blurry at that viewing distance.
+const VR_TEXT_SS = 3;
+function makeCanvasTexture(canvas){
+  const t = new THREE.CanvasTexture(canvas);
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+const VR_BTN_COLOR = 0x1b2230, VR_BTN_HOVER_COLOR = 0x2a3f5c;
+
 /* ============================== VR wrist menu ============================== */
 const vrMenu = { group: new THREE.Group(), visible: false, buttons: [], targetPath: null, targetNode: null };
 vrMenu.group.visible = false;
@@ -2412,11 +2424,11 @@ function buildVRMenuButtons(){
 
     // Label as a small text sprite
     const canvas = document.createElement('canvas');
-    canvas.width = 128; canvas.height = 32;
+    canvas.width = 128*VR_TEXT_SS; canvas.height = 32*VR_TEXT_SS;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#cfd6e2'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(item, 64, 22);
-    const tex = new THREE.CanvasTexture(canvas);
+    ctx.fillStyle = '#cfd6e2'; ctx.font = (16*VR_TEXT_SS) + 'px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(item, 64*VR_TEXT_SS, 22*VR_TEXT_SS);
+    const tex = makeCanvasTexture(canvas);
     const labelGeo = new THREE.PlaneGeometry(btnW * 0.9, btnH * 0.8);
     const labelMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
     const label = new THREE.Mesh(labelGeo, labelMat);
@@ -2482,7 +2494,7 @@ function hideVRWristMenu(){
 
 /* ============================== VR watch menu (gaze-activated) ============================== */
 const vrWatch = { group: new THREE.Group(), visible: false, buttons: [], sliderParts: null,
-  pokeActive: null, statsTimer: 0 };
+  pokeActive: null, statsTimer: 0, toastHideAt: 0 };
 vrWatch.group.visible = false;
 scene.add(vrWatch.group);
 
@@ -2491,32 +2503,52 @@ function createVRWatchMenu(){
   const btnW = (W - gap * 3) / cols;
   let y = 0;
 
-  function addLabel(text){
-    const c = document.createElement('canvas'); c.width = 256; c.height = 24;
+  function addLabel(text, pctText){
+    const rowY = y;
+    const c = document.createElement('canvas'); c.width = 256*VR_TEXT_SS; c.height = 24*VR_TEXT_SS;
     const ctx = c.getContext('2d');
-    ctx.fillStyle = '#7d8798'; ctx.font = 'bold 11px sans-serif';
-    ctx.fillText(text, 4, 16);
-    const tex = new THREE.CanvasTexture(c);
+    ctx.fillStyle = '#7d8798'; ctx.font = 'bold ' + (11*VR_TEXT_SS) + 'px sans-serif';
+    ctx.fillText(text, 4*VR_TEXT_SS, 16*VR_TEXT_SS);
+    const tex = makeCanvasTexture(c);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(W, 0.018),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-    m.position.set(0, y, 0.001);
+    m.position.set(0, rowY, 0.001);
     vrWatch.group.add(m);
     y -= 0.022;
+
+    if (pctText === undefined) return;
+    // live-updatable percentage readout, right-aligned on the same row
+    // (see updateVRWatchSlider(), which redraws this on every slider move)
+    const pc = document.createElement('canvas'); pc.width = 80*VR_TEXT_SS; pc.height = 24*VR_TEXT_SS;
+    const pctx = pc.getContext('2d');
+    const draw = (t) => {
+      pctx.clearRect(0, 0, pc.width, pc.height);
+      pctx.fillStyle = '#e0a43c'; pctx.font = 'bold ' + (11*VR_TEXT_SS) + 'px sans-serif'; pctx.textAlign = 'right';
+      pctx.fillText(t, pc.width - 2*VR_TEXT_SS, 16*VR_TEXT_SS);
+    };
+    draw(pctText);
+    const ptex = makeCanvasTexture(pc);
+    const pm = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.018),
+      new THREE.MeshBasicMaterial({ map: ptex, transparent: true }));
+    pm.position.set(W/2 - 0.032, rowY, 0.001);
+    vrWatch.group.add(pm);
+    vrWatch.simplifyPctTex = ptex;
+    vrWatch._drawSimplifyPct = (t) => { draw(t); ptex.needsUpdate = true; };
   }
 
   function addButton(text, action, colIdx, sameLine){
     if (!sameLine) { /* new row handled by caller */ }
     const geo = new THREE.PlaneGeometry(btnW, btnH);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x1b2230, transparent: true, opacity: 0.85 });
+    const mat = new THREE.MeshBasicMaterial({ color: VR_BTN_COLOR, transparent: true, opacity: 0.85 });
     const mesh = new THREE.Mesh(geo, mat);
     const xPos = colIdx === 0 ? -(btnW/2 + gap/2) : (btnW/2 + gap/2);
     mesh.position.set(xPos, y, 0.001);
     // Label
-    const c = document.createElement('canvas'); c.width = 128; c.height = 28;
+    const c = document.createElement('canvas'); c.width = 128*VR_TEXT_SS; c.height = 28*VR_TEXT_SS;
     const ctx = c.getContext('2d');
-    ctx.fillStyle = '#cfd6e2'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(text, 64, 19);
-    const tex = new THREE.CanvasTexture(c);
+    ctx.fillStyle = '#cfd6e2'; ctx.font = (13*VR_TEXT_SS) + 'px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(text, 64*VR_TEXT_SS, 19*VR_TEXT_SS);
+    const tex = makeCanvasTexture(c);
     const lbl = new THREE.Mesh(new THREE.PlaneGeometry(btnW * 0.9, btnH * 0.75),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
     lbl.position.z = 0.001;
@@ -2534,30 +2566,32 @@ function createVRWatchMenu(){
   addLabel('SCENE');
   addButton('Load File', () => {
     // Can't open a file picker in VR, but we can trigger it on exit
-    toast('Exit VR to load a file (file picker requires browser UI)');
+    vrToast('Exit VR to load a file');
   }, 0);
   addButton('Demo Room', () => {
     document.getElementById('btnDemo').click();
-    toast('Loading demo room');
+    vrToast('Loading demo room');
   }, 1);
   nextRow();
-  addButton('Reset Scene', () => resetAll(), 0);
+  addButton('Reset Scene', () => { resetAll(); vrToast('Scene reset'); }, 0);
   addButton('Export Edits', () => {
     document.getElementById('btnExport').click();
-    toast('Edits exported');
+    vrToast('Edits exported');
   }, 1);
   nextRow();
   addButton('Force Opaque', () => {
     document.getElementById('btnOpaque').click();
+    vrToast('Force opaque toggled');
   }, 0);
   addButton('Light/Dark', () => {
     document.getElementById('btnTheme').click();
+    vrToast('Theme toggled');
   }, 1);
   nextRow();
 
   // === SIMPLIFY section ===
   y -= gap * 2;
-  addLabel('SIMPLIFY');
+  addLabel('SIMPLIFY', '0%');
   // Slider track
   const trackW = W - gap * 4, trackH = 0.012;
   const trackGeo = new THREE.PlaneGeometry(trackW, trackH);
@@ -2578,13 +2612,14 @@ function createVRWatchMenu(){
   nextRow();
   addButton('Apply', () => {
     document.getElementById('btnSimplify').click();
+    vrToast('Simplify applied');
   }, 0);
   // Stats display (not clickable)
-  const statsC = document.createElement('canvas'); statsC.width = 128; statsC.height = 28;
+  const statsC = document.createElement('canvas'); statsC.width = 128*VR_TEXT_SS; statsC.height = 28*VR_TEXT_SS;
   const statsCtx = statsC.getContext('2d');
-  statsCtx.fillStyle = '#7d8798'; statsCtx.font = '11px sans-serif';
-  statsCtx.fillText('--', 4, 18);
-  const statsTex = new THREE.CanvasTexture(statsC);
+  statsCtx.fillStyle = '#7d8798'; statsCtx.font = (11*VR_TEXT_SS) + 'px sans-serif';
+  statsCtx.fillText('--', 4*VR_TEXT_SS, 18*VR_TEXT_SS);
+  const statsTex = makeCanvasTexture(statsC);
   const statsMesh = new THREE.Mesh(new THREE.PlaneGeometry(btnW, btnH),
     new THREE.MeshBasicMaterial({ map: statsTex, transparent: true }));
   statsMesh.position.set(btnW/2 + gap/2, y, 0.001);
@@ -2595,6 +2630,20 @@ function createVRWatchMenu(){
   vrWatch.statsCanvas = statsC;
   nextRow();
 
+  // === STATUS row: an in-scene stand-in for toast(), which is an invisible
+  // DOM element while presenting in VR - see vrToast() below.
+  const toastC = document.createElement('canvas'); toastC.width = 256*VR_TEXT_SS; toastC.height = 20*VR_TEXT_SS;
+  const toastCtx = toastC.getContext('2d');
+  const toastTex = makeCanvasTexture(toastC);
+  const toastMesh = new THREE.Mesh(new THREE.PlaneGeometry(W, 0.016),
+    new THREE.MeshBasicMaterial({ map: toastTex, transparent: true }));
+  toastMesh.position.set(0, y, 0.001);
+  vrWatch.group.add(toastMesh);
+  vrWatch.toastCtx = toastCtx;
+  vrWatch.toastTex = toastTex;
+  vrWatch.toastCanvas = toastC;
+  nextRow();
+
   // Background
   const totalH = Math.abs(y) + gap * 2;
   const bgGeo = new THREE.PlaneGeometry(W + gap * 2, totalH);
@@ -2603,16 +2652,30 @@ function createVRWatchMenu(){
   bg.position.set(0, y/2 + (btnH + gap)/2, -0.002);
   vrWatch.group.add(bg);
 }
+
+// In-headset stand-in for toast(): shows a message on the watch panel
+// itself for a few seconds, then clears - toast()'s DOM element is
+// invisible while an immersive session is presenting, so buttons that only
+// called toast() looked completely unresponsive in VR.
+function vrToast(msg){
+  if (!vrWatch.toastCtx) return;
+  const ctx = vrWatch.toastCtx;
+  ctx.clearRect(0, 0, vrWatch.toastCanvas.width, vrWatch.toastCanvas.height);
+  ctx.fillStyle = '#5fbf6e'; ctx.font = 'bold ' + (11*VR_TEXT_SS) + 'px sans-serif';
+  ctx.fillText(msg.slice(0, 30), 4*VR_TEXT_SS, 15*VR_TEXT_SS);
+  vrWatch.toastTex.needsUpdate = true;
+  vrWatch.toastHideAt = performance.now() + 2500;
+}
 createVRWatchMenu();
 vrWatch.group.scale.setScalar(0.5); // shrink the whole panel to a real wrist-watch scale
 
 function updateVRWatchStats(){
   if (!vrWatch.statsCtx) return;
   const ctx = vrWatch.statsCtx;
-  ctx.clearRect(0, 0, 128, 28);
-  ctx.fillStyle = '#7d8798'; ctx.font = '11px sans-serif';
+  ctx.clearRect(0, 0, vrWatch.statsCanvas.width, vrWatch.statsCanvas.height);
+  ctx.fillStyle = '#7d8798'; ctx.font = (11*VR_TEXT_SS) + 'px sans-serif';
   const stats = document.getElementById('stats').textContent;
-  ctx.fillText(stats.slice(0, 22), 4, 18);
+  ctx.fillText(stats.slice(0, 22), 4*VR_TEXT_SS, 18*VR_TEXT_SS);
   vrWatch.statsTex.needsUpdate = true;
 }
 
@@ -2621,10 +2684,12 @@ function updateVRWatchSlider(pct){
   const { handle, trackW } = vrWatch.sliderParts;
   const x = -trackW/2 + trackW * pct;
   handle.position.x = x;
-  // Update the DOM slider to match
   const notch = Math.round(pct * 10);
+  const pctText = (notch * 3) + '%';
+  // Update the DOM slider to match
   document.getElementById('simplifySlider').value = notch;
-  document.getElementById('simplifyPct').textContent = (notch * 3) + '%';
+  document.getElementById('simplifyPct').textContent = pctText;
+  if (vrWatch._drawSimplifyPct) vrWatch._drawSimplifyPct(pctText);
 }
 
 // The wrist menu is rigidly attached to the LEFT controller at all times
@@ -2696,7 +2761,24 @@ function updateWristMenus(){
       const notch = parseInt(document.getElementById('simplifySlider').value, 10);
       updateVRWatchSlider(notch / 10);
     }
+    if (vrWatch.toastHideAt && performance.now() > vrWatch.toastHideAt){
+      vrWatch.toastHideAt = 0;
+      vrWatch.toastCtx.clearRect(0, 0, vrWatch.toastCanvas.width, vrWatch.toastCanvas.height);
+      vrWatch.toastTex.needsUpdate = true;
+    }
   }
+}
+
+// Fire a short haptic pulse on whichever controller owns `grip`, if the
+// hardware/browser exposes one - there's no way to test this in the
+// sandbox, but the API degrades to a silent no-op if it's unsupported.
+function pulseHaptic(grip, intensity, durationMs){
+  const c = controllers.find(cc => cc.userData.grip === grip);
+  const handedness = c && c.userData.handedness;
+  const session = handedness && renderer.xr.getSession();
+  const src = session && [...session.inputSources].find(s => s.handedness === handedness);
+  const actuator = src && src.gamepad && src.gamepad.hapticActuators && src.gamepad.hapticActuators[0];
+  if (actuator) actuator.pulse(intensity, durationMs);
 }
 
 // Poke-based interaction: the OTHER hand's controller physically touching a
@@ -2705,14 +2787,22 @@ function updateWristMenus(){
 // bit of hand tremor into a big miss. Fires a button's action on the rising
 // edge of contact (retreat and poke again to press twice); the slider
 // updates continuously while touched, since dragging is the expected
-// gesture there.
+// gesture there. Highlights the touched button and pulses haptics on that
+// same rising edge, since aiming with no laser and no highlight otherwise
+// gives zero feedback that you're even over a button.
 function updateVRWatchPoke(wearGrip){
   let pokeGrip = null;
   for (const c of controllers){
     const g = c.userData.grip;
     if (g && g !== wearGrip){ pokeGrip = g; break; }
   }
-  if (!pokeGrip){ vrWatch.pokeActive = null; return; }
+  if (!pokeGrip){
+    if (vrWatch.pokeActive && !vrWatch.pokeActive.userData.isSlider){
+      vrWatch.pokeActive.material.color.setHex(VR_BTN_COLOR);
+    }
+    vrWatch.pokeActive = null;
+    return;
+  }
 
   pokeGrip.updateMatrixWorld(true);
   const pokePos = new THREE.Vector3().setFromMatrixPosition(pokeGrip.matrixWorld);
@@ -2726,6 +2816,16 @@ function updateVRWatchPoke(wearGrip){
     if (Math.abs(local.x) < halfW && Math.abs(local.y) < halfH && Math.abs(local.z) < 0.06){
       hit = btn;
       break;
+    }
+  }
+
+  if (hit !== vrWatch.pokeActive){
+    if (vrWatch.pokeActive && !vrWatch.pokeActive.userData.isSlider){
+      vrWatch.pokeActive.material.color.setHex(VR_BTN_COLOR);
+    }
+    if (hit){
+      if (!hit.userData.isSlider) hit.material.color.setHex(VR_BTN_HOVER_COLOR);
+      pulseHaptic(pokeGrip, 0.35, 25);
     }
   }
 
