@@ -127,14 +127,6 @@ section {
 }
 
 /* --- Engineering Experience (infinite drag/swipe photo gallery) --- */
-.section-engineering {
-    padding: 2.5rem 0 2.5rem;
-}
-
-.section-engineering .container:first-child {
-    padding-bottom: 1.25rem;
-}
-
 .gallery-viewport {
     position: relative;
     width: 100%;
@@ -167,13 +159,39 @@ section {
     height: 100%;
     object-fit: cover;
     display: block;
-    pointer-events: none;
 }
 
 .gallery-caption {
     margin-top: 1.25rem;
     color: var(--text-muted);
     font-size: 0.9rem;
+}
+
+.project-detail {
+    padding: 3rem 0;
+    border-top: 1px solid var(--border);
+    /* offsets the scrollIntoView() target so the sticky navbar doesn't cover the heading */
+    scroll-margin-top: 90px;
+}
+
+.project-detail img {
+    display: block;
+    width: 100%;
+    max-width: 640px;
+    margin-bottom: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.project-detail h2 {
+    font-size: 1.4rem;
+    margin-bottom: 0.75rem;
+    color: var(--primary);
+}
+
+.project-detail p {
+    color: var(--text-muted);
+    max-width: 640px;
 }
 
 /* --- About --- */

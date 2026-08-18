@@ -3,16 +3,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const world = document.getElementById('galleryWorld');
     if (!viewport || !world) return;
 
-    // Placeholder photos - swap these for real project/work photos
+    // Placeholder photos - swap these for real project/work photos. Each entry's
+    // targetId is the project section a click on that photo scrolls down to.
     const IMAGES = [
-        'assets/images/engineering/eng-01.jpg',
-        'assets/images/engineering/eng-02.png',
-        'assets/images/engineering/eng-03.jpg',
-        'assets/images/engineering/eng-04.png',
-        'assets/images/engineering/eng-05.jpg',
-        'assets/images/engineering/eng-06.jpg',
-        'assets/images/engineering/eng-07.jpg',
-        'assets/images/engineering/eng-08.jpg',
+        { src: 'assets/images/engineering/eng-01.jpg', targetId: 'project-1' },
+        { src: 'assets/images/engineering/eng-02.png', targetId: 'project-2' },
+        { src: 'assets/images/engineering/eng-03.jpg', targetId: 'project-3' },
+        { src: 'assets/images/engineering/eng-04.png', targetId: 'project-4' },
+        { src: 'assets/images/engineering/eng-05.jpg', targetId: 'project-5' },
+        { src: 'assets/images/engineering/eng-06.jpg', targetId: 'project-6' },
+        { src: 'assets/images/engineering/eng-07.jpg', targetId: 'project-7' },
+        { src: 'assets/images/engineering/eng-08.jpg', targetId: 'project-8' },
     ];
     const PATTERN_COLS = 4, PATTERN_ROWS = 2; // one repeating tile = one of each image
     // The tile is rendered 3x3 times (REPEATS) so that no matter where the wrapped
@@ -21,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // instead of growing images forever.
     const REPEATS = 3;
     const TILE_SCALE = 1.3; // each tile is this many viewport-widths/heights, so a single tile alone already overflows the screen
+    const CLICK_MAX_MOVE = 6; // px - a pointer session under this is a click/tap, not a drag
 
     const state = { rawX: 0, rawY: 0, tileW: 0, tileH: 0 };
 
@@ -41,10 +43,11 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let c = 0; c < cols; c++) {
                 const idx = (r % PATTERN_ROWS) * PATTERN_COLS + (c % PATTERN_COLS);
                 const img = document.createElement('img');
-                img.src = IMAGES[idx];
+                img.src = IMAGES[idx].src;
                 img.alt = '';
                 img.draggable = false;
                 img.loading = 'lazy';
+                img.dataset.index = idx;
                 frag.appendChild(img);
             }
         }
@@ -70,9 +73,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let dragging = false, startX = 0, startY = 0, startRawX = 0, startRawY = 0;
+    let downImg = null, moveDist = 0;
 
     viewport.addEventListener('pointerdown', e => {
         dragging = true;
+        moveDist = 0;
+        downImg = e.target.closest('img');
         viewport.setPointerCapture(e.pointerId);
         startX = e.clientX; startY = e.clientY;
         startRawX = state.rawX; startRawY = state.rawY;
@@ -80,17 +86,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     viewport.addEventListener('pointermove', e => {
         if (!dragging) return;
-        state.rawX = startRawX + (e.clientX - startX);
-        state.rawY = startRawY + (e.clientY - startY);
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        moveDist = Math.max(moveDist, Math.hypot(dx, dy));
+        state.rawX = startRawX + dx;
+        state.rawY = startRawY + dy;
         applyTransform();
     });
     function endDrag() {
+        if (dragging && moveDist < CLICK_MAX_MOVE && downImg) {
+            const entry = IMAGES[Number(downImg.dataset.index)];
+            const target = entry && document.getElementById(entry.targetId);
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
         dragging = false;
+        downImg = null;
         viewport.classList.remove('dragging');
     }
     viewport.addEventListener('pointerup', endDrag);
-    viewport.addEventListener('pointercancel', endDrag);
-    viewport.addEventListener('pointerleave', endDrag);
+    viewport.addEventListener('pointercancel', () => { dragging = false; downImg = null; viewport.classList.remove('dragging'); });
+    viewport.addEventListener('pointerleave', () => { dragging = false; downImg = null; viewport.classList.remove('dragging'); });
 
     let resizeTimer = null;
     addEventListener('resize', () => {
