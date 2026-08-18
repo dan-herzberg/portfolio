@@ -159,6 +159,17 @@ section {
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* hints the photos are clickable - suppressed mid-drag (:not(.dragging)) so
+   tiles don't pop as the pointer slides over them while panning */
+.gallery-viewport:not(.dragging) .gallery-world img:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 2px var(--primary), 0 10px 26px rgba(0, 0, 0, 0.55);
+    position: relative;
+    z-index: 2;
+    cursor: pointer;
 }
 
 .gallery-caption {
