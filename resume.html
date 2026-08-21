@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume | D. Herzberg</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="index.html">D. HERZBERG</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="engineering.html">Engineering Experience</a></li>
+            <li><a href="projects.html">Side Projects</a></li>
+            <li><a href="resume.html" class="active">Resume</a></li>
+            <li><a href="https://www.BostonSWUG.com" target="_blank" rel="noopener">BostonSWUG</a></li>
+        </ul>
+    </nav>
+
+    <header class="page-header container">
+        <h1>Resume</h1>
+        <p>View below, or download the PDF directly.</p>
+        <a href="assets/resume/Daniel_Herzberg_Resume.pdf" class="btn" download style="margin-top:1rem;">
+            <i class="fas fa-download"></i> Download Resume
+        </a>
+    </header>
+
+    <section class="container">
+        <div class="resume-viewer">
+            <iframe src="assets/resume/Daniel_Herzberg_Resume.pdf" title="D. Herzberg Resume"></iframe>
+            <p class="resume-fallback">
+                Can't see the preview? <a href="assets/resume/Daniel_Herzberg_Resume.pdf" target="_blank" rel="noopener">Open the PDF in a new tab</a>.
+            </p>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg</p>
+    </footer>
+
+    <script src="js/nav.js"></script>
+</body>
+</html>
