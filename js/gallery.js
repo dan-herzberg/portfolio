@@ -3,9 +3,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const world = document.getElementById('galleryWorld');
     if (!viewport || !world) return;
 
-    // Placeholder photos - swap these for real project/work photos. Each entry's
-    // targetId is the project section a click on that photo scrolls down to.
-    const IMAGES = [
+    // Each page sets window.GALLERY_IMAGES (src + the project section a click scrolls
+    // to) before this script loads; falls back to the engineering page's set.
+    const IMAGES = window.GALLERY_IMAGES || [
         { src: 'assets/images/engineering/eng-01.jpg', targetId: 'project-1' },
         { src: 'assets/images/engineering/eng-02.png', targetId: 'project-2' },
         { src: 'assets/images/engineering/eng-03.jpg', targetId: 'project-3' },
@@ -15,7 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
         { src: 'assets/images/engineering/eng-07.jpg', targetId: 'project-7' },
         { src: 'assets/images/engineering/eng-08.jpg', targetId: 'project-8' },
     ];
-    const PATTERN_COLS = 4, PATTERN_ROWS = 2; // one repeating tile = one of each image
+    // Near-square tile shape sized to however many images this page has (8 images ->
+    // 4x2, matching the original layout exactly).
+    const PATTERN_COLS = Math.max(1, Math.ceil(Math.sqrt(IMAGES.length * 1.6)));
+    const PATTERN_ROWS = Math.max(1, Math.ceil(IMAGES.length / PATTERN_COLS));
     // The tile is rendered 3x3 times (REPEATS) so that no matter where the wrapped
     // drag offset lands within a tile, a full tile of buffer surrounds the viewport
     // on every side - that's what makes the pan feel endless with a fixed-size DOM
@@ -41,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const frag = document.createDocumentFragment();
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-                const idx = (r % PATTERN_ROWS) * PATTERN_COLS + (c % PATTERN_COLS);
+                const idx = ((r % PATTERN_ROWS) * PATTERN_COLS + (c % PATTERN_COLS)) % IMAGES.length;
                 const img = document.createElement('img');
                 img.src = IMAGES[idx].src;
                 img.alt = '';

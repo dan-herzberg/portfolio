@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Making &amp; DIY | D. Herzberg</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="index.html">D. HERZBERG</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="engineering.html">Engineering Experience</a></li>
+            <li><a href="making.html" class="active">Making &amp; DIY</a></li>
+            <li><a href="projects.html">Side Projects</a></li>
+            <li><a href="resume.html">Resume</a></li>
+            <li><a href="https://www.BostonSWUG.com" target="_blank" rel="noopener">BostonSWUG</a></li>
+        </ul>
+    </nav>
+
+    <header class="page-header container">
+        <h1>Making &amp; DIY</h1>
+        <p>3D printing, personal builds, and other things made outside of work.</p>
+    </header>
+
+    <div id="galleryViewport" class="gallery-viewport">
+        <div id="galleryWorld" class="gallery-world"></div>
+    </div>
+    <div class="container">
+        <p class="gallery-caption">
+            <!-- TODO: swap these placeholder photos for real make/print photos -->
+            Drag (or swipe on mobile) to explore, or click a photo to jump to that project &mdash; placeholder
+            photos and text for now.
+        </p>
+    </div>
+
+    <section id="make-project-1" class="container project-detail">
+        <h2>Ender-3 3D Printer &amp; Printed Parts</h2>
+        <!-- TODO: replace with a real project title, description, tools, and outcome -->
+        <div class="project-body">
+            <div class="project-media count-2">
+                <img src="assets/images/making/make-01.jpg" alt="">
+                <img src="assets/images/making/make-02.jpg" alt="">
+            </div>
+            <p>Placeholder paragraph about this project &mdash; swap in a real description, the tools used, and the
+                outcome.</p>
+        </div>
+    </section>
+
+    <section id="make-project-2" class="container project-detail">
+        <h2>Multi-Color Phone &amp; Battery Holder</h2>
+        <div class="project-body">
+            <div class="project-media count-1">
+                <img src="assets/images/making/make-03.jpg" alt="">
+            </div>
+            <p>Placeholder paragraph about this project &mdash; swap in a real description, the tools used, and the
+                outcome.</p>
+        </div>
+    </section>
+
+    <section id="make-project-3" class="container project-detail">
+        <h2>LEGO Collection</h2>
+        <div class="project-body">
+            <div class="project-media count-1">
+                <img src="assets/images/making/make-04.jpg" alt="">
+            </div>
+            <p>Placeholder paragraph about this project &mdash; swap in a real description, the tools used, and the
+                outcome.</p>
+        </div>
+    </section>
+
+    <section id="make-project-4" class="container project-detail">
+        <h2>Fossil Watch CAD Model</h2>
+        <div class="project-body">
+            <div class="project-media count-2">
+                <img src="assets/images/making/make-05.jpg" alt="">
+                <img src="assets/images/making/make-06.jpg" alt="">
+            </div>
+            <p>Placeholder paragraph about this project &mdash; swap in a real description, the tools used, and the
+                outcome.</p>
+        </div>
+    </section>
+
+    <section id="make-project-5" class="container project-detail">
+        <h2>Barrett M107 Replica Model</h2>
+        <div class="project-body">
+            <div class="project-media count-1">
+                <img src="assets/images/making/make-07.jpg" alt="">
+            </div>
+            <p>Placeholder paragraph about this project &mdash; swap in a real description, the tools used, and the
+                outcome.</p>
+        </div>
+    </section>
+
+    <section id="make-project-6" class="container project-detail">
+        <h2>Stargate Prop Replica</h2>
+        <div class="project-body">
+            <div class="project-media count-1">
+                <img src="assets/images/making/make-08.jpg" alt="">
+            </div>
+            <p>Placeholder paragraph about this project &mdash; swap in a real description, the tools used, and the
+                outcome.</p>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <p>&copy; 2026 D. Herzberg</p>
+    </footer>
+
+    <script src="js/nav.js"></script>
+    <script>
+        window.GALLERY_IMAGES = [
+            { src: 'assets/images/making/make-01.jpg', targetId: 'make-project-1' },
+            { src: 'assets/images/making/make-02.jpg', targetId: 'make-project-1' },
+            { src: 'assets/images/making/make-03.jpg', targetId: 'make-project-2' },
+            { src: 'assets/images/making/make-04.jpg', targetId: 'make-project-3' },
+            { src: 'assets/images/making/make-05.jpg', targetId: 'make-project-4' },
+            { src: 'assets/images/making/make-06.jpg', targetId: 'make-project-4' },
+            { src: 'assets/images/making/make-07.jpg', targetId: 'make-project-5' },
+            { src: 'assets/images/making/make-08.jpg', targetId: 'make-project-6' },
+        ];
+    </script>
+    <script src="js/gallery.js"></script>
+    <script src="js/lightbox.js"></script>
+</body>
+</html>
