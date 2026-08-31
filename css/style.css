@@ -28,7 +28,13 @@ html {
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
-    background: var(--bg-dark);
+    background-color: var(--bg-dark);
+    /* subtle isometric mesh - three 60deg-apart line families (equal period ->
+       equilateral triangles), one color per direction from the site's own palette */
+    background-image:
+        repeating-linear-gradient(30deg,  rgba(0, 212, 255, 0.10) 0 1px, transparent 1px 42px),
+        repeating-linear-gradient(90deg,  rgba(167, 139, 250, 0.09) 0 1px, transparent 1px 42px),
+        repeating-linear-gradient(150deg, rgba(255, 107, 53, 0.09) 0 1px, transparent 1px 42px);
     color: var(--text);
     line-height: 1.6;
 }
