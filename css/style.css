@@ -263,6 +263,17 @@ section {
     grid-row: 2;
 }
 
+/* projects with more than 4 photos: same fixed area, more (smaller) equal cells
+   instead of the count-1..4 hero layouts above */
+.project-media.count-5,
+.project-media.count-6,
+.project-media.count-7,
+.project-media.count-8,
+.project-media.count-9 {
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+}
+
 @media (max-width: 640px) {
     .project-body {
         flex-direction: column;
