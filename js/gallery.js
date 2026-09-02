@@ -6,14 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Each page sets window.GALLERY_IMAGES (src + the project section a click scrolls
     // to) before this script loads; falls back to the engineering page's set.
     const IMAGES = window.GALLERY_IMAGES || [
-        { src: 'assets/images/engineering/eng-01.jpg', targetId: 'project-1' },
-        { src: 'assets/images/engineering/eng-02.png', targetId: 'project-2' },
-        { src: 'assets/images/engineering/eng-03.jpg', targetId: 'project-3' },
-        { src: 'assets/images/engineering/eng-04.png', targetId: 'project-4' },
-        { src: 'assets/images/engineering/eng-05.jpg', targetId: 'project-5' },
-        { src: 'assets/images/engineering/eng-06.jpg', targetId: 'project-6' },
-        { src: 'assets/images/engineering/eng-07.jpg', targetId: 'project-7' },
-        { src: 'assets/images/engineering/eng-08.jpg', targetId: 'project-8' },
+        { src: 'assets/images/engineering/engagement-ring.png', targetId: 'project-1' },
+        { src: 'assets/images/engineering/philips-epiq-ultrasound.png', targetId: 'project-2' },
     ];
     // Near-square tile shape sized to however many images this page has (8 images ->
     // 4x2, matching the original layout exactly).
